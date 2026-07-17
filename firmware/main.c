@@ -1,6 +1,8 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include "pico/stdlib.h"
 #include "hardware/clocks.h"
+#include "hardware/timer.h"
 #include "defs.h"
 #include "bitboard.h"
 #include "zobrist.h"
@@ -10,6 +12,9 @@
 int main() {
     // Initialize stdio
     stdio_init_all();
+
+    // Seed the random number generator using the Pico hardware microsecond timer
+    srand(time_us_32());
 
     // Wait up to 3 seconds for USB CDC terminal to connect.
     // If no terminal connects, proceed anyway (standalone TM1638 play).

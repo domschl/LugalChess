@@ -6,6 +6,9 @@
 #include "evaluation.h"
 #include "tt.h"
 #include <sys/time.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
 
 // Global search variables
 int max_search_depth = 64;
@@ -20,6 +23,137 @@ static Move killer_moves[2][MAX_PLYS]; // [killer_index][ply]
 
 // Approximate piece values for MVV-LVA sorting
 static const int sorting_values[6] = { 100, 300, 300, 500, 900, 10000 };
+
+static const char *book_lines[] = {
+    // 1. e4 lines
+    "e2e4 e7e5 g1f3 b8c6 f1b5 a7a6 b5a4 g8f6 e1g1 f8e7", // Ruy Lopez
+    "e2e4 e7e5 g1f3 b8c6 f1c4 f8c5 c2c3 g8f6 d2d4", // Italian
+    "e2e4 c7c5 g1f3 d7d6 d2d4 c5d4 f3d4 g8f6 b1c3 a7a6", // Sicilian Najdorf
+    "e2e4 c7c5 g1f3 e7e6 d2d4 c5d4 f3d4 b8c6 b1c3 d7d6", // Sicilian Taimanov
+    "e2e4 c7c5 c2c3 d7d5 e4d5 d8d5 d2d4 g8f6", // Sicilian Alapin
+    "e2e4 e7e6 d2d4 d7d5 b1c3 g8f6 c1g5 f8e7", // French Classical
+    "e2e4 c7c6 d2d4 d7d5 b1c3 d5e4 c3e4 c8f5", // Caro-Kann
+    "e2e4 d7d6 d2d4 g8f6 b1c3 g7g6 f2f4 f8g7", // Pirc
+    // 2. d4 lines
+    "d2d4 d7d5 c2c4 e7e6 b1c3 g8f6 c1g5 f8e7", // QGD
+    "d2d4 d7d5 c2c4 c7c6 g1f3 g8f6 b1c3 e7e6", // Slav
+    "d2d4 g8f6 c2c4 g7g6 b1c3 f8g7 e4e5 d6d6", // King's Indian
+    "d2d4 g8f6 c2c4 e7e6 g1f3 b7b6 g2g3 c8b7", // Queen's Indian
+    "d2d4 g8f6 c2c4 e7e6 b1c3 f8b4 e2e3 e1g1", // Nimzo-Indian
+    // 3. Flank openings
+    "g1f3 d7d5 g2g3 g8f6 f1g2 c7c6 e1g1 c8f5", // KIA
+    "c2c4 e7e5 b1c3 g8f6 g1f3 b8c6 g2g3 f8b4", // English
+    "f2f4 d7d5 g1f3 g8f6 e2e3 c7c5 f1e2 b8c6" // Bird's
+};
+
+static Move get_book_move(Position *pos) {
+    char history_str[512] = "";
+    int offset = 0;
+    for (int i = 0; i < pos->history_ply; i++) {
+        Move m = pos->history[i].move;
+        int from = MOVE_FROM(m);
+        int to = MOVE_TO(m);
+        char m_str[6];
+        m_str[0] = 'a' + (from % 8);
+        m_str[1] = '1' + (from / 8);
+        m_str[2] = 'a' + (to % 8);
+        m_str[3] = '1' + (to / 8);
+        m_str[4] = '\0';
+        if (move_is_promo(m)) {
+            int promo = move_promo_piece(m);
+            const char promo_chars[] = "  pnbrqk";
+            m_str[4] = promo_chars[promo];
+            m_str[5] = '\0';
+        }
+        
+        int len = snprintf(history_str + offset, sizeof(history_str) - offset, "%s%s", i > 0 ? " " : "", m_str);
+        if (len < 0 || offset + len >= (int)sizeof(history_str)) {
+            return 0;
+        }
+        offset += len;
+    }
+
+    const char *candidates[64];
+    int candidate_count = 0;
+    int history_len = strlen(history_str);
+
+    int book_size = sizeof(book_lines) / sizeof(book_lines[0]);
+    for (int i = 0; i < book_size; i++) {
+        const char *line = book_lines[i];
+        if (history_len == 0) {
+            candidates[candidate_count++] = line;
+        } else {
+            if (strncmp(line, history_str, history_len) == 0 && (line[history_len] == ' ' || line[history_len] == '\0')) {
+                if (line[history_len] == ' ') {
+                    candidates[candidate_count++] = line + history_len + 1;
+                }
+            }
+        }
+        if (candidate_count >= 64) break;
+    }
+
+    if (candidate_count == 0) {
+        return 0;
+    }
+
+    char next_move_strs[64][6];
+    int unique_count = 0;
+    for (int i = 0; i < candidate_count; i++) {
+        const char *cand = candidates[i];
+        char next_m[6];
+        int c_idx = 0;
+        while (cand[c_idx] != ' ' && cand[c_idx] != '\0' && c_idx < 5) {
+            next_m[c_idx] = cand[c_idx];
+            c_idx++;
+        }
+        next_m[c_idx] = '\0';
+
+        bool is_unique = true;
+        for (int j = 0; j < unique_count; j++) {
+            if (strcmp(next_move_strs[j], next_m) == 0) {
+                is_unique = false;
+                break;
+            }
+        }
+        if (is_unique) {
+            strcpy(next_move_strs[unique_count++], next_m);
+        }
+    }
+
+    if (unique_count == 0) return 0;
+
+    int choice = rand() % unique_count;
+    const char *chosen_move_str = next_move_strs[choice];
+
+    MoveList list;
+    generate_moves(pos, &list);
+    for (int i = 0; i < list.count; i++) {
+        Move m = list.moves[i];
+        if (make_move(pos, m)) {
+            unmake_move(pos);
+            int from = MOVE_FROM(m);
+            int to = MOVE_TO(m);
+            char m_str[6];
+            m_str[0] = 'a' + (from % 8);
+            m_str[1] = '1' + (from / 8);
+            m_str[2] = 'a' + (to % 8);
+            m_str[3] = '1' + (to / 8);
+            m_str[4] = '\0';
+            if (move_is_promo(m)) {
+                int promo = move_promo_piece(m);
+                const char promo_chars[] = "  pnbrqk";
+                m_str[4] = promo_chars[promo];
+                m_str[5] = '\0';
+            }
+
+            if (strcmp(m_str, chosen_move_str) == 0) {
+                return m;
+            }
+        }
+    }
+
+    return 0;
+}
 
 // Time check helper
 static long get_time_ms(void) {
@@ -316,6 +450,25 @@ int pv_search(Position *pos, int depth, int ply, int alpha, int beta, bool null_
 
 // Iterative deepening entry point
 void search_position(Position *pos, int depth, int time_limit_ms) {
+    // Check if there is an opening book move
+    Move book_move = get_book_move(pos);
+    if (book_move != 0) {
+        int from = MOVE_FROM(book_move);
+        int to = MOVE_TO(book_move);
+        printf("bestmove %c%d%c%d", 'a' + (from % 8), (from / 8) + 1, 'a' + (to % 8), (to / 8) + 1);
+        if (move_is_promo(book_move)) {
+            int promo = move_promo_piece(book_move);
+            const char promo_chars[] = "  pnbrqk";
+            printf("%c", promo_chars[promo]);
+        }
+        printf("\n");
+        fflush(stdout);
+
+        // Store in TT so that caller (e.g. make_engine_move) can retrieve it
+        write_tt(pos->hash_key, book_move, 0, depth, TT_EXACT);
+        return;
+    }
+
     start_search_time_ms = get_time_ms();
     max_search_time_ms = time_limit_ms;
     stop_search = false;
@@ -330,6 +483,8 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
 
     // Iterative Deepening
     for (int d = 1; d <= depth; d++) {
+        extern void search_progress_callback(Move move, int score, int depth);
+        search_progress_callback(0, 0, d);
         int score = pv_search(pos, d, 0, -INFINITY_VALUE, INFINITY_VALUE, true);
         
         if (stop_search) {

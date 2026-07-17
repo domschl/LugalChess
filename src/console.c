@@ -122,28 +122,73 @@ static void show_board_rank(const Position *pos, int rank) {
     tm1638_display_string(formatted);
 }
 
-// Progress callback for updating the screen during engine search
-void search_progress_callback(Move move, int score, int depth) {
-    if (move == 0) return;
+static Move current_search_best_move = 0;
+static int current_search_score = 0;
+static int current_search_depth = 0;
+static uint32_t last_display_toggle_ms = 0;
+static bool display_show_score = true;
+
+static void update_thinking_display(void) {
     char move_str[5];
-    char score_str[5];
-    format_move_str(move, move_str);
-    format_score_str(score, score_str);
+    if (current_search_best_move != 0) {
+        format_move_str(current_search_best_move, move_str);
+    } else {
+        strcpy(move_str, "tHIn");
+    }
+    
+    char right_str[5];
+    if (display_show_score) {
+        if (current_search_best_move != 0) {
+            format_score_str(current_search_score, right_str);
+        } else {
+            strcpy(right_str, "K   ");
+        }
+    } else {
+        snprintf(right_str, sizeof(right_str), "L-%02d", current_search_depth);
+    }
     
     char buf[9];
     for (int i = 0; i < 4; i++) {
         buf[i] = toupper((unsigned char)move_str[i]);
-        buf[i + 4] = toupper((unsigned char)score_str[i]);
+        buf[i + 4] = toupper((unsigned char)right_str[i]);
     }
     buf[8] = '\0';
     tm1638_display_string(buf);
 }
 
-// Poll key to abort search
+// Progress callback for updating the screen during engine search
+void search_progress_callback(Move move, int score, int depth) {
+    if (depth == 1 && move == 0) {
+        // Reset search states on start
+        current_search_best_move = 0;
+        current_search_score = 0;
+        current_search_depth = 1;
+        display_show_score = true;
+        last_display_toggle_ms = time_us_32() / 1000;
+    }
+    
+    if (move != 0) {
+        current_search_best_move = move;
+        current_search_score = score;
+    }
+    current_search_depth = depth;
+    update_thinking_display();
+}
+
+// Poll key to abort search and toggle thinking display every second
 void search_poll_stop_callback(void) {
+    // Check if Stop button (key 11) is pressed
     int key = tm1638_get_key();
-    if (key == 11) { // Key 11 is the STOP button
+    if (key == 11) {
         stop_search = true;
+    }
+    
+    // Alternating display toggle every 1000 ms
+    uint32_t now_ms = time_us_32() / 1000;
+    if (now_ms - last_display_toggle_ms >= 1000) {
+        display_show_score = !display_show_score;
+        last_display_toggle_ms = now_ms;
+        update_thinking_display();
     }
 }
 
@@ -203,6 +248,24 @@ static bool execute_player_move(Position *pos, const char *move_str) {
 
     MoveList list;
     generate_moves(pos, &list);
+
+    // If user didn't specify a promotion piece, check if the only legal moves for this from/to are promotions.
+    // If so, default to QUEEN.
+    if (promo_piece == NO_PIECE) {
+        bool only_promo = false;
+        for (int i = 0; i < list.count; i++) {
+            Move move = list.moves[i];
+            if (MOVE_FROM(move) == from && MOVE_TO(move) == to) {
+                if (move_is_promo(move)) {
+                    only_promo = true;
+                    break;
+                }
+            }
+        }
+        if (only_promo) {
+            promo_piece = QUEEN;
+        }
+    }
 
     for (int i = 0; i < list.count; i++) {
         Move move = list.moves[i];
@@ -534,6 +597,52 @@ static void sync_moves_from_history(const Position *pos) {
 }
 #endif
 
+static bool check_and_display_game_over(Position *pos) {
+    MoveList list;
+    generate_moves(pos, &list);
+    int legal_cnt = 0;
+    for (int i = 0; i < list.count; i++) {
+        if (make_move(pos, list.moves[i])) {
+            legal_cnt++;
+            unmake_move(pos);
+            break;
+        }
+    }
+    
+    if (legal_cnt == 0) {
+        int in_check = is_square_attacked(pos, get_lsb(pos->piece_bbs[KING] & pos->color_bbs[pos->side]), pos->side ^ 1);
+        if (in_check) {
+            if (pos->side == WHITE) {
+                printf("\nCheckmate! Black wins!\n");
+#if defined(__arm__) || defined(PICO_BOARD)
+                tm1638_display_string("nAtE bL "); // "mate bl"
+#endif
+            } else {
+                printf("\nCheckmate! White wins!\n");
+#if defined(__arm__) || defined(PICO_BOARD)
+                tm1638_display_string("nAtE UH "); // "mate wh"
+#endif
+            }
+        } else {
+            printf("\nStalemate! Game is a draw.\n");
+#if defined(__arm__) || defined(PICO_BOARD)
+            tm1638_display_string("drAU    "); // "draw"
+#endif
+        }
+        return true;
+    }
+    
+    if (pos->halfmove >= 100) {
+        printf("\nDraw by 50-move rule.\n");
+#if defined(__arm__) || defined(PICO_BOARD)
+        tm1638_display_string("drAU    ");
+#endif
+        return true;
+    }
+
+    return false;
+}
+
 void console_loop(void) {
     // Initialize Transposition Table (safely allocate 32KB on microcontrollers, 16MB on host)
 #if defined(__arm__) || defined(PICO_BOARD)
@@ -684,29 +793,12 @@ void console_loop(void) {
 
                 
                 // Check if game is over
-                MoveList list;
-                generate_moves(&pos, &list);
-                int legal_cnt = 0;
-                for (int i = 0; i < list.count; i++) {
-                    if (make_move(&pos, list.moves[i])) {
-                        legal_cnt++;
-                        unmake_move(&pos);
-                        break;
-                    }
-                }
-                
-                if (legal_cnt == 0) {
-                    // Check if in check
-                    int in_check = is_square_attacked(&pos, get_lsb(pos.piece_bbs[KING] & pos.color_bbs[pos.side]), pos.side ^ 1);
-                    if (in_check) {
-                        printf("\nCheckmate! You win!\n");
-                    } else {
-                        printf("\nStalemate! Game is a draw.\n");
-                    }
-                } else {
+                if (!check_and_display_game_over(&pos)) {
                     // Trigger engine move
                     make_engine_move(&pos);
                     print_board(&pos);
+                    // Check if engine's move ended the game
+                    check_and_display_game_over(&pos);
                 }
             } else {
                 printf("Unknown command or invalid move: '%s'. Type 'help' for instructions.\n", line);

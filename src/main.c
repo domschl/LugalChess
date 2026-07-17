@@ -6,9 +6,14 @@
 #include "movegen.h"
 #include "uci.h"
 #include "console.h"
+#include <stdlib.h>
+#include <time.h>
 
 
 int main(int argc, char *argv[]) {
+    // Seed random number generator
+    srand(time(NULL));
+
     // Initialize engine systems
     init_bitboards();
     init_zobrist();
