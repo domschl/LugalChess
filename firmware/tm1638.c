@@ -126,12 +126,13 @@ void tm1638_display_string(const char *str) {
 
     // CRITICAL: Transpose the 8x8 matrix (since QYF-TM1638 is Common Anode)
     // Digit i segment s is bit s of buffer[i].
-    // It maps to bit i of tm1638_ram[s * 2] (address 0xC0 + s*2).
+    // In common anode QYF modules, SEG lines are wired to anodes (digits) in reverse,
+    // so Digit digit maps to bit (7 - digit) of tm1638_ram[s * 2].
     for (int seg = 0; seg < 8; seg++) {
         uint8_t val = 0;
         for (int digit = 0; digit < 8; digit++) {
             if ((buffer[digit] >> seg) & 1) {
-                val |= (1 << digit);
+                val |= (1 << (7 - digit));
             }
         }
         tm1638_ram[seg * 2] = val;
@@ -169,18 +170,17 @@ int tm1638_get_key(void) {
     }
     gpio_put(TM_STB_PIN, 1);
     
-    // Matrix key decoding (matched to the QYF-TM1638 matrix scan pattern on K3 and K2):
+    // Matrix key decoding (maps the scan bytes consecutively to physical keys S1..S16):
     for (int i = 0; i < 4; i++) {
-        uint8_t i_keys = keys[i];
-        for (int k = 0; k < 2; k++) {
-            for (int j = 0; j < 2; j++) {
-                uint8_t x = (0x04 >> k) << (j * 4);
-                if ((i_keys & x) == x) {
-                    // This button is pressed!
-                    return j + k * 2 + i * 4;
-                }
-            }
-        }
+        uint8_t b = keys[i];
+        
+        // Check K3 line (S1..S8)
+        if (b & 0x04) return i * 2 + 0;
+        if (b & 0x40) return i * 2 + 1;
+        
+        // Check K2 line (S9..S16)
+        if (b & 0x02) return i * 2 + 8;
+        if (b & 0x20) return i * 2 + 9;
     }
     
     return -1; // No key pressed
