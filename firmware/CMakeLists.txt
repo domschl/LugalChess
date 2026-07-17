@@ -14,6 +14,7 @@ pico_sdk_init()
 # Define firmware executable
 add_executable(lugalchess_firmware
     main.c
+    tm1638.c
     ../src/bitboard.c
     ../src/position.c
     ../src/movegen.c
@@ -36,7 +37,9 @@ target_compile_definitions(lugalchess_firmware PRIVATE USE_MAGIC_BITBOARDS=0)
 # Link hardware libraries
 target_link_libraries(lugalchess_firmware PRIVATE
     pico_stdlib
+    pico_multicore
 )
+
 
 
 # Enable USB serial output and disable UART to prevent conflicts, or keep both enabled

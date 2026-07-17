@@ -12,6 +12,19 @@
 #include <string.h>
 #include <stdlib.h>
 
+#if defined(__arm__) || defined(PICO_BOARD)
+#include "pico/stdlib.h"
+#include "pico/multicore.h"
+static void send_move_to_core1(const char *move_str) {
+    uint32_t msg = ((uint32_t)move_str[0] << 24) |
+                   ((uint32_t)move_str[1] << 16) |
+                   ((uint32_t)move_str[2] << 8)  |
+                   ((uint32_t)move_str[3]);
+    multicore_fifo_push_blocking(msg);
+}
+#endif
+
+
 static int search_depth = 5; // Default search depth level
 
 // Print commands help
@@ -103,6 +116,14 @@ static void make_engine_move(Position *pos) {
         printf(" (Score: %+d)\n", score);
         
         make_move(pos, best_move);
+#if defined(__arm__) || defined(PICO_BOARD)
+        char engine_move_str[5];
+        sprintf(engine_move_str, "%c%d%c%d", 
+                'a' + (from % 8), (from / 8) + 1,
+                'a' + (to % 8), (to / 8) + 1);
+        send_move_to_core1(engine_move_str);
+#endif
+
     } else {
         printf("Engine resigned or found no legal moves.\n");
     }
@@ -112,10 +133,37 @@ static void make_engine_move(Position *pos) {
 static void get_line_custom(char *buffer, int max_len) {
     int len = 0;
     while (len < max_len - 1) {
-        int c = getchar();
+        int c;
+#if defined(__arm__) || defined(PICO_BOARD)
+        // Check multicore FIFO first (TM1638 keyboard input)
+        if (multicore_fifo_rvalid()) {
+            uint32_t msg = multicore_fifo_pop_blocking();
+            buffer[0] = (msg >> 24) & 0xFF;
+            buffer[1] = (msg >> 16) & 0xFF;
+            buffer[2] = (msg >> 8) & 0xFF;
+            buffer[3] = msg & 0xFF;
+            buffer[4] = '\0';
+            
+            // Print to standard output so it mirrors on USB terminal
+            printf("%s\n", buffer);
+            fflush(stdout);
+            return;
+        }
+
+        // Non-blocking read from USB/UART serial
+        c = getchar_timeout_us(0);
+        if (c == PICO_ERROR_TIMEOUT) {
+            sleep_ms(1);
+            continue;
+        }
+#else
+        c = getchar();
+#endif
+
         if (c == EOF || c == 0) {
             continue;
         }
+
         
         // Handle newline / carriage return
         if (c == '\r' || c == '\n') {
@@ -260,7 +308,11 @@ void console_loop(void) {
         else {
             // Try to parse input as a player move
             if (execute_player_move(&pos, line)) {
+#if defined(__arm__) || defined(PICO_BOARD)
+                send_move_to_core1(line);
+#endif
                 print_board(&pos);
+
                 
                 // Check if game is over
                 MoveList list;
