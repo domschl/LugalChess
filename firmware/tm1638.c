@@ -18,14 +18,36 @@ static const uint8_t font7seg[128] = {
     ['t'] = 0x78, ['y'] = 0x6E
 };
 
-// Write a byte to DIO using serial clock
+// Internal 16-byte RAM cache corresponding to display & LED addresses
+static uint8_t tm1638_ram[16];
+
+// Send command to the display module
+static void tm1638_send_command(uint8_t cmd) {
+    gpio_put(TM_STB_PIN, 0);
+    tm1638_write_byte(cmd);
+    gpio_put(TM_STB_PIN, 1);
+}
+
+// Flush local RAM cache to TM1638 display registers using Auto-Increment address mode (0x40)
+static void tm1638_flush(void) {
+    tm1638_send_command(0x40); // Set write mode to auto increment address
+
+    gpio_put(TM_STB_PIN, 0);
+    tm1638_write_byte(0xC0); // Start address
+    for (int i = 0; i < 16; i++) {
+        tm1638_write_byte(tm1638_ram[i]);
+    }
+    gpio_put(TM_STB_PIN, 1);
+}
+
+// Write a byte to DIO with stable timing delays for RP2350 high clock rate
 void tm1638_write_byte(uint8_t byte) {
     for (int i = 0; i < 8; i++) {
         gpio_put(TM_CLK_PIN, 0);
         gpio_put(TM_DIO_PIN, (byte >> i) & 1);
-        sleep_us(1);
+        sleep_us(3); // Clock low pulse width
         gpio_put(TM_CLK_PIN, 1);
-        sleep_us(1);
+        sleep_us(3); // Clock high pulse width
     }
 }
 
@@ -33,25 +55,17 @@ void tm1638_write_byte(uint8_t byte) {
 uint8_t tm1638_read_byte(void) {
     uint8_t byte = 0;
     gpio_set_dir(TM_DIO_PIN, GPIO_IN);
-    sleep_us(1);
     for (int i = 0; i < 8; i++) {
         gpio_put(TM_CLK_PIN, 0);
-        sleep_us(1);
+        sleep_us(3);
         gpio_put(TM_CLK_PIN, 1);
-        sleep_us(1);
+        sleep_us(3);
         if (gpio_get(TM_DIO_PIN)) {
             byte |= (1 << i);
         }
     }
     gpio_set_dir(TM_DIO_PIN, GPIO_OUT);
     return byte;
-}
-
-// Write control instruction
-static void tm1638_send_command(uint8_t cmd) {
-    gpio_put(TM_STB_PIN, 0);
-    tm1638_write_byte(cmd);
-    gpio_put(TM_STB_PIN, 1);
 }
 
 // Initialize GPIO pins and TM1638 chip
@@ -64,25 +78,22 @@ void tm1638_init(void) {
     gpio_set_dir(TM_CLK_PIN, GPIO_OUT);
     gpio_set_dir(TM_DIO_PIN, GPIO_OUT);
 
+    // CRITICAL: Enable internal pull-up resistor on the bidirectional DIO pin
+    // This prevents the pin from floating when the TM1638 drives it during scanning.
+    gpio_pull_up(TM_DIO_PIN);
+
     gpio_put(TM_STB_PIN, 1);
     gpio_put(TM_CLK_PIN, 1);
     gpio_put(TM_DIO_PIN, 0);
 
     sleep_ms(10);
 
-    // Command 1: Active display with max brightness
+    // Command 1: Active display with max brightness (0x8F)
     tm1638_send_command(0x8F);
-    
-    // Command 2: Set write mode to auto address increment
-    tm1638_send_command(0x40);
 
-    // Clear display memory (addresses 0xC0 to 0xCF)
-    gpio_put(TM_STB_PIN, 0);
-    tm1638_write_byte(0xC0);
-    for (int i = 0; i < 16; i++) {
-        tm1638_write_byte(0x00);
-    }
-    gpio_put(TM_STB_PIN, 1);
+    // Clear RAM cache and flush it to clean the screen and LEDs
+    memset(tm1638_ram, 0, 16);
+    tm1638_flush();
 }
 
 // Display an 8-character string on the 7-segment displays
@@ -98,7 +109,7 @@ void tm1638_display_string(const char *str) {
         
         // Handle decimal point combined with previous character
         if (c == '.' && buf_idx > 0) {
-            buffer[buf_idx - 1] |= 0x80; // Turn on decimal point bit
+            buffer[buf_idx - 1] |= 0x80;
         } else {
             uint8_t pattern = 0x00;
             if ((uint8_t)c < 128) {
@@ -108,23 +119,24 @@ void tm1638_display_string(const char *str) {
         }
     }
 
-    // Write display buffer to even display addresses (0xC0, 0xC2, 0xC4, ...)
+    // Update digit values in local RAM cache (even indices: 0, 2, 4, ... 14)
     for (int i = 0; i < 8; i++) {
-        gpio_put(TM_STB_PIN, 0);
-        tm1638_write_byte(0xC0 + (i * 2));
-        tm1638_write_byte(buffer[i]);
-        gpio_put(TM_STB_PIN, 1);
+        tm1638_ram[i * 2] = buffer[i];
     }
+
+    // Flush cache to screen
+    tm1638_flush();
 }
 
 // Set states of the 8 individual LEDs (bitmask)
 void tm1638_set_leds(uint8_t mask) {
+    // Update LED values in local RAM cache (odd indices: 1, 3, 5, ... 15)
     for (int i = 0; i < 8; i++) {
-        gpio_put(TM_STB_PIN, 0);
-        tm1638_write_byte(0xC1 + (i * 2)); // Odd addresses control LEDs
-        tm1638_write_byte((mask >> i) & 1);
-        gpio_put(TM_STB_PIN, 1);
+        tm1638_ram[(i * 2) + 1] = (mask >> i) & 1;
     }
+
+    // Flush cache to screen
+    tm1638_flush();
 }
 
 // Scan the keyboard and return pressed key index (0 to 15), or -1 if none
@@ -133,6 +145,9 @@ int tm1638_get_key(void) {
     
     gpio_put(TM_STB_PIN, 0);
     tm1638_write_byte(0x42); // Read keys command
+    
+    // CRITICAL: Wait at least 5 microseconds for DIO pin state turnaround
+    sleep_us(5);
     
     // Read 4 bytes of scan data
     for (int i = 0; i < 4; i++) {
