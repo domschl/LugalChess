@@ -12,7 +12,7 @@ static const uint8_t font7seg[128] = {
     ['I'] = 0x06, ['J'] = 0x1E, ['L'] = 0x38, ['O'] = 0x3F,
     ['P'] = 0x73, ['S'] = 0x6D, ['U'] = 0x3E, ['Y'] = 0x6E,
     ['a'] = 0x5F, ['b'] = 0x7C, ['c'] = 0x58, ['d'] = 0x5E,
-    ['e'] = 0x7B, ['f'] = 0x71, ['g'] = 0x6F, ['h'] = 0x74,
+    ['e'] = 0x79, ['f'] = 0x71, ['g'] = 0x6F, ['h'] = 0x74,
     ['i'] = 0x04, ['j'] = 0x0E, ['l'] = 0x06, ['n'] = 0x54,
     ['o'] = 0x5C, ['p'] = 0x73, ['r'] = 0x50, ['u'] = 0x1C,
     ['t'] = 0x78, ['y'] = 0x6E
@@ -26,6 +26,7 @@ static void tm1638_send_command(uint8_t cmd) {
     gpio_put(TM_STB_PIN, 0);
     tm1638_write_byte(cmd);
     gpio_put(TM_STB_PIN, 1);
+    sleep_us(2); // Strobe recovery delay
 }
 
 // Flush local RAM cache to TM1638 display registers using Auto-Increment address mode (0x40)
@@ -38,9 +39,11 @@ static void tm1638_flush(void) {
         tm1638_write_byte(tm1638_ram[i]);
     }
     gpio_put(TM_STB_PIN, 1);
+    sleep_us(2); // Strobe recovery delay
 }
 
 // Write a byte to DIO with stable timing delays for RP2350 high clock rate
+// IMPORTANT: Caller must ensure DIO is in GPIO_OUT mode before calling.
 void tm1638_write_byte(uint8_t byte) {
     for (int i = 0; i < 8; i++) {
         gpio_put(TM_CLK_PIN, 0);
@@ -52,19 +55,18 @@ void tm1638_write_byte(uint8_t byte) {
 }
 
 // Read a byte from DIO (during key scanning)
+// IMPORTANT: Caller must ensure DIO is in GPIO_IN mode before calling.
 uint8_t tm1638_read_byte(void) {
     uint8_t byte = 0;
-    gpio_set_dir(TM_DIO_PIN, GPIO_IN);
     for (int i = 0; i < 8; i++) {
         gpio_put(TM_CLK_PIN, 0);
         sleep_us(3);
         gpio_put(TM_CLK_PIN, 1);
-        sleep_us(3);
+        sleep_us(3); // TM1638 shifts data out on rising edge
         if (gpio_get(TM_DIO_PIN)) {
             byte |= (1 << i);
         }
     }
-    gpio_set_dir(TM_DIO_PIN, GPIO_OUT);
     return byte;
 }
 
@@ -76,10 +78,9 @@ void tm1638_init(void) {
 
     gpio_set_dir(TM_STB_PIN, GPIO_OUT);
     gpio_set_dir(TM_CLK_PIN, GPIO_OUT);
-    gpio_set_dir(TM_DIO_PIN, GPIO_OUT);
+    gpio_set_dir(TM_DIO_PIN, GPIO_OUT); // Default: OUTPUT for commands/display writes
 
-    // CRITICAL: Enable internal pull-up resistor on the bidirectional DIO pin
-    // This prevents the pin from floating when the TM1638 drives it during scanning.
+    // Enable internal pull-up on DIO for when it switches to INPUT during key reads
     gpio_pull_up(TM_DIO_PIN);
 
     gpio_put(TM_STB_PIN, 1);
@@ -126,8 +127,8 @@ void tm1638_display_string(const char *str) {
 
     // CRITICAL: Transpose the 8x8 matrix (since QYF-TM1638 is Common Anode)
     // Digit i segment s is bit s of buffer[i].
-    // In common anode QYF modules, SEG lines are wired to anodes (digits) in reverse,
-    // so Digit digit maps to bit (7 - digit) of tm1638_ram[s * 2].
+    // Digit index 0 (left-most character) maps to bit 7 (Digit 1 on module).
+    // Digit index 7 (right-most character) maps to bit 0 (Digit 8 on module).
     for (int seg = 0; seg < 8; seg++) {
         uint8_t val = 0;
         for (int digit = 0; digit < 8; digit++) {
@@ -161,24 +162,49 @@ int tm1638_get_key(void) {
     gpio_put(TM_STB_PIN, 0);
     tm1638_write_byte(0x42); // Read keys command
     
-    // CRITICAL: Wait at least 5 microseconds for DIO pin state turnaround
-    sleep_us(5);
+    // Switch DIO to INPUT mode once before reading all key bytes
+    gpio_set_dir(TM_DIO_PIN, GPIO_IN);
+    sleep_us(5); // Wait for DIO turnaround
     
     // Read 4 bytes of scan data
     for (int i = 0; i < 4; i++) {
         keys[i] = tm1638_read_byte();
     }
-    gpio_put(TM_STB_PIN, 1);
     
-    // Matrix key decoding (maps the scan bytes consecutively to physical keys S1..S16):
+    // Switch DIO back to OUTPUT mode for subsequent write operations
+    gpio_set_dir(TM_DIO_PIN, GPIO_OUT);
+    
+    gpio_put(TM_STB_PIN, 1);
+    sleep_us(2); // Strobe recovery delay
+    
+    // Phantom key rejection: count total pressed keys across all bytes.
+    // If more than 1 key appears pressed, it's noise from the bus.
+    // Key-relevant bits per byte: 0x04 (K3/KS_odd), 0x40 (K3/KS_even),
+    //                              0x02 (K2/KS_odd), 0x20 (K2/KS_even)
+    int total_pressed = 0;
+    for (int i = 0; i < 4; i++) {
+        uint8_t b = keys[i] & 0x66; // Mask to key-relevant bits only
+        keys[i] = b;
+        while (b) {
+            total_pressed += (b & 1);
+            b >>= 1;
+        }
+    }
+    if (total_pressed != 1) {
+        return -1; // No key or phantom (multiple keys / noise)
+    }
+    
+    // Matrix key decoding:
+    // K3 line -> S1..S8  -> File keys (indices 0..7)
+    // K2 line -> S9..S16 -> Rank keys (indices 8..15)
     for (int i = 0; i < 4; i++) {
         uint8_t b = keys[i];
         
-        // Check K3 line (S1..S8)
+        // K3 line: File keys 0..7
         if (b & 0x04) return i * 2 + 0;
         if (b & 0x40) return i * 2 + 1;
         
-        // Check K2 line (S9..S16)
+        // K2 line: Rank keys 8..15
         if (b & 0x02) return i * 2 + 8;
         if (b & 0x20) return i * 2 + 9;
     }

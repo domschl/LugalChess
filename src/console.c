@@ -14,18 +14,34 @@
 
 #if defined(__arm__) || defined(PICO_BOARD)
 #include "pico/stdlib.h"
-#include "pico/multicore.h"
-static void send_move_to_core1(const char *move_str) {
-    uint32_t msg = ((uint32_t)move_str[0] << 24) |
-                   ((uint32_t)move_str[1] << 16) |
-                   ((uint32_t)move_str[2] << 8)  |
-                   ((uint32_t)move_str[3]);
-    multicore_fifo_push_blocking(msg);
+#include "tm1638.h"
+#include <ctype.h>
+
+static char last_player_move[5] = "    ";
+static char last_engine_move[5] = "    ";
+
+static void update_tm1638_display(void) {
+    char buf[9];
+    // Copy player move (uppercase)
+    for (int i = 0; i < 4; i++) {
+        buf[i] = last_player_move[i] ? toupper((unsigned char)last_player_move[i]) : ' ';
+    }
+    // Copy engine move (uppercase)
+    for (int i = 0; i < 4; i++) {
+        buf[i + 4] = last_engine_move[i] ? toupper((unsigned char)last_engine_move[i]) : ' ';
+    }
+    buf[8] = '\0';
+    tm1638_display_string(buf);
 }
 #endif
 
 
-static int search_depth = 5; // Default search depth level
+// Default search depth: lower on firmware to reduce stack usage
+#if defined(__arm__) || defined(PICO_BOARD)
+static int search_depth = 2;
+#else
+static int search_depth = 5;
+#endif
 
 // Print commands help
 static void print_help(void) {
@@ -117,11 +133,12 @@ static void make_engine_move(Position *pos) {
         
         make_move(pos, best_move);
 #if defined(__arm__) || defined(PICO_BOARD)
-        char engine_move_str[5];
-        sprintf(engine_move_str, "%c%d%c%d", 
-                'a' + (from % 8), (from / 8) + 1,
-                'a' + (to % 8), (to / 8) + 1);
-        send_move_to_core1(engine_move_str);
+        last_engine_move[0] = 'a' + (from % 8);
+        last_engine_move[1] = '1' + (from / 8);
+        last_engine_move[2] = 'a' + (to % 8);
+        last_engine_move[3] = '1' + (to / 8);
+        last_engine_move[4] = '\0';
+        update_tm1638_display();
 #endif
 
     } else {
@@ -132,28 +149,62 @@ static void make_engine_move(Position *pos) {
 // Portable line reader that echos characters, handles backspace/delete, and handles \r/\n
 static void get_line_custom(char *buffer, int max_len) {
     int len = 0;
+#if defined(__arm__) || defined(PICO_BOARD)
+    static char keypad_input[5] = "";
+    static int keypad_len = 0;
+#endif
+
     while (len < max_len - 1) {
         int c;
 #if defined(__arm__) || defined(PICO_BOARD)
-        // Check multicore FIFO first (TM1638 keyboard input)
-        if (multicore_fifo_rvalid()) {
-            uint32_t msg = multicore_fifo_pop_blocking();
-            buffer[0] = (msg >> 24) & 0xFF;
-            buffer[1] = (msg >> 16) & 0xFF;
-            buffer[2] = (msg >> 8) & 0xFF;
-            buffer[3] = msg & 0xFF;
-            buffer[4] = '\0';
-            
-            // Print to standard output so it mirrors on USB terminal
-            printf("%s\n", buffer);
-            fflush(stdout);
-            return;
+        // 1. Poll TM1638 Keypad directly on Core 0
+        int key = tm1638_get_key();
+        if (key != -1) {
+            // Key press debouncing
+            sleep_ms(250);
+
+            // Determine character type and append if valid
+            if (key >= 0 && key <= 7) {
+                // Keys 0..7 map to Files 'a' through 'h'
+                char file_char = 'a' + key;
+                if (keypad_len == 0 || keypad_len == 2) {
+                    keypad_input[keypad_len++] = file_char;
+                    keypad_input[keypad_len] = '\0';
+                }
+            } else if (key >= 8 && key <= 15) {
+                // Keys 8..15 map to Ranks '1' through '8'
+                char rank_char = '1' + (key - 8);
+                if (keypad_len == 1 || keypad_len == 3) {
+                    keypad_input[keypad_len++] = rank_char;
+                    keypad_input[keypad_len] = '\0';
+                }
+            }
+
+            // Sync with display state
+            for (int i = 0; i < 4; i++) {
+                last_player_move[i] = (i < keypad_len) ? keypad_input[i] : ' ';
+            }
+            strcpy(last_engine_move, "    ");
+            update_tm1638_display();
+
+            if (keypad_len == 4) {
+                // Copy to return buffer
+                strcpy(buffer, keypad_input);
+                
+                // Clear state for next move
+                keypad_len = 0;
+                keypad_input[0] = '\0';
+
+                // Print to standard output so it mirrors on USB terminal
+                printf("%s\n", buffer);
+                fflush(stdout);
+                return;
+            }
         }
 
-        // Non-blocking read from USB/UART serial
-        c = getchar_timeout_us(0);
+        // 2. Poll USB serial with 10ms timeout
+        c = getchar_timeout_us(10000);
         if (c == PICO_ERROR_TIMEOUT) {
-            sleep_ms(1);
             continue;
         }
 #else
@@ -309,7 +360,10 @@ void console_loop(void) {
             // Try to parse input as a player move
             if (execute_player_move(&pos, line)) {
 #if defined(__arm__) || defined(PICO_BOARD)
-                send_move_to_core1(line);
+                strncpy(last_player_move, line, 4);
+                last_player_move[4] = '\0';
+                strcpy(last_engine_move, "    ");
+                update_tm1638_display();
 #endif
                 print_board(&pos);
 

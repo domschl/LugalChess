@@ -29,6 +29,7 @@ add_executable(lugalchess_firmware
 # Include search path for headers
 target_include_directories(lugalchess_firmware PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/../src
+    ${CMAKE_CURRENT_LIST_DIR}
 )
 
 # Set compile definitions (use 0 KB on-the-fly sliding attacks for embedded RAM limits)
@@ -46,6 +47,23 @@ target_link_libraries(lugalchess_firmware PRIVATE
 pico_enable_stdio_usb(lugalchess_firmware 1)
 pico_enable_stdio_uart(lugalchess_firmware 0)
 
-
 # Generate UF2 output file
 pico_add_extra_outputs(lugalchess_firmware)
+
+# Define hardware test executable
+add_executable(test_tm1638
+    test_tm1638.c
+    tm1638.c
+)
+
+target_include_directories(test_tm1638 PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/../src
+)
+
+target_link_libraries(test_tm1638 PRIVATE
+    pico_stdlib
+)
+
+pico_enable_stdio_usb(test_tm1638 1)
+pico_enable_stdio_uart(test_tm1638 0)
+pico_add_extra_outputs(test_tm1638)
