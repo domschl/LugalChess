@@ -12,6 +12,9 @@
 void core1_entry(void) {
     tm1638_init();
 
+    printf("[TM1638 Debug] Driver initialized. Showing boot message.\n");
+    fflush(stdout);
+
     // Show splash string "LUgAL CH" (LugalChess) on boot
     tm1638_display_string("LUgAL CH");
 
@@ -25,8 +28,12 @@ void core1_entry(void) {
         // 1. Scan TM1638 Keypad (keys 0 to 15)
         int key = tm1638_get_key();
         if (key != -1) {
+            printf("[TM1638 Debug] Key index pressed: %d\n", key);
+            fflush(stdout);
+
             // Key press debouncing
             sleep_ms(250);
+
 
             // Determine character type
             if (key >= 0 && key <= 7) {

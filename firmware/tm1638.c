@@ -119,9 +119,22 @@ void tm1638_display_string(const char *str) {
         }
     }
 
-    // Update digit values in local RAM cache (even indices: 0, 2, 4, ... 14)
-    for (int i = 0; i < 8; i++) {
-        tm1638_ram[i * 2] = buffer[i];
+    // Clear digit values in RAM cache (even indices)
+    for (int seg = 0; seg < 8; seg++) {
+        tm1638_ram[seg * 2] = 0x00;
+    }
+
+    // CRITICAL: Transpose the 8x8 matrix (since QYF-TM1638 is Common Anode)
+    // Digit i segment s is bit s of buffer[i].
+    // It maps to bit i of tm1638_ram[s * 2] (address 0xC0 + s*2).
+    for (int seg = 0; seg < 8; seg++) {
+        uint8_t val = 0;
+        for (int digit = 0; digit < 8; digit++) {
+            if ((buffer[digit] >> seg) & 1) {
+                val |= (1 << digit);
+            }
+        }
+        tm1638_ram[seg * 2] = val;
     }
 
     // Flush cache to screen
@@ -130,7 +143,8 @@ void tm1638_display_string(const char *str) {
 
 // Set states of the 8 individual LEDs (bitmask)
 void tm1638_set_leds(uint8_t mask) {
-    // Update LED values in local RAM cache (odd indices: 1, 3, 5, ... 15)
+    // Note: QYF-TM1638 modules typically do not have the 8 individual LEDs,
+    // but we support it in cache anyway for completeness.
     for (int i = 0; i < 8; i++) {
         tm1638_ram[(i * 2) + 1] = (mask >> i) & 1;
     }
@@ -155,21 +169,18 @@ int tm1638_get_key(void) {
     }
     gpio_put(TM_STB_PIN, 1);
     
-    // Matrix key decoding:
-    // Row 0 (K1, KS1..KS4): keys 0, 1, 2, 3
-    // Row 1 (K1, KS5..KS8): keys 4, 5, 6, 7
-    // Row 2 (K2, KS1..KS4): keys 8, 9, 10, 11
-    // Row 3 (K2, KS5..KS8): keys 12, 13, 14, 15
-    for (int byte_idx = 0; byte_idx < 4; byte_idx++) {
-        uint8_t b = keys[byte_idx];
-        
-        // KS(2*byte_idx+1) -> Column odd (KS1, KS3, KS5, KS7)
-        if (b & 0x01) return byte_idx * 2;       // Row 0/1 (K1)
-        if (b & 0x02) return byte_idx * 2 + 8;   // Row 2/3 (K2)
-        
-        // KS(2*byte_idx+2) -> Column even (KS2, KS4, KS6, KS8)
-        if (b & 0x10) return byte_idx * 2 + 1;   // Row 0/1 (K1)
-        if (b & 0x20) return byte_idx * 2 + 9;   // Row 2/3 (K2)
+    // Matrix key decoding (matched to the QYF-TM1638 matrix scan pattern on K3 and K2):
+    for (int i = 0; i < 4; i++) {
+        uint8_t i_keys = keys[i];
+        for (int k = 0; k < 2; k++) {
+            for (int j = 0; j < 2; j++) {
+                uint8_t x = (0x04 >> k) << (j * 4);
+                if ((i_keys & x) == x) {
+                    // This button is pressed!
+                    return j + k * 2 + i * 4;
+                }
+            }
+        }
     }
     
     return -1; // No key pressed
