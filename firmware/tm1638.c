@@ -20,7 +20,8 @@ static const uint8_t font7seg[128] = {
     // Additional approximations for letters that are otherwise missing
     ['N'] = 0x54, ['R'] = 0x50, ['Q'] = 0x67, ['q'] = 0x67,
     ['K'] = 0x76, ['k'] = 0x76, ['M'] = 0x37, ['m'] = 0x54,
-    ['W'] = 0x3E, ['w'] = 0x1C, ['V'] = 0x3E, ['v'] = 0x1C
+    ['W'] = 0x3E, ['w'] = 0x1C, ['V'] = 0x3E, ['v'] = 0x1C,
+    ['T'] = 0x78
 };
 
 // Internal 16-byte RAM cache corresponding to display & LED addresses

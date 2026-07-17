@@ -463,3 +463,62 @@ void print_position_info(const Position *pos) {
     printf("Fullmove: %d\n", pos->fullmove);
     printf("Hash: 0x%016llx\n", (unsigned long long)pos->hash_key);
 }
+
+// Generate FEN string from position state
+void generate_fen(const Position *pos, char *buf) {
+    int char_idx = 0;
+    // Ranks from 8 down to 1 (index 7 down to 0)
+    for (int r = 7; r >= 0; r--) {
+        int empty_cnt = 0;
+        for (int f = 0; f < 8; f++) {
+            int sq = f + r * 8;
+            int piece = pos->board[sq];
+            if (piece == NO_PIECE) {
+                empty_cnt++;
+            } else {
+                if (empty_cnt > 0) {
+                    buf[char_idx++] = '0' + empty_cnt;
+                    empty_cnt = 0;
+                }
+                const char piece_chars[] = "PNBRQK";
+                char c = piece_chars[piece];
+                int color = (pos->color_bbs[WHITE] & (1ULL << sq)) ? WHITE : BLACK;
+                buf[char_idx++] = (color == WHITE) ? c : (c + ('a' - 'A'));
+            }
+        }
+        if (empty_cnt > 0) {
+            buf[char_idx++] = '0' + empty_cnt;
+        }
+        if (r > 0) {
+            buf[char_idx++] = '/';
+        }
+    }
+
+    // Side to move
+    buf[char_idx++] = ' ';
+    buf[char_idx++] = (pos->side == WHITE) ? 'w' : 'b';
+
+    // Castling rights
+    buf[char_idx++] = ' ';
+    int rights = pos->castling_rights;
+    int initial_char_idx = char_idx;
+    if (rights & WK_CASTLE) buf[char_idx++] = 'K';
+    if (rights & WQ_CASTLE) buf[char_idx++] = 'Q';
+    if (rights & BK_CASTLE) buf[char_idx++] = 'k';
+    if (rights & BQ_CASTLE) buf[char_idx++] = 'q';
+    if (char_idx == initial_char_idx) {
+        buf[char_idx++] = '-';
+    }
+
+    // En passant target square
+    buf[char_idx++] = ' ';
+    if (pos->en_passant != NO_SQ) {
+        buf[char_idx++] = 'a' + (pos->en_passant % 8);
+        buf[char_idx++] = '1' + (pos->en_passant / 8);
+    } else {
+        buf[char_idx++] = '-';
+    }
+
+    // Halfmove clock and Fullmove number
+    snprintf(buf + char_idx, 64, " %d %d", pos->halfmove, pos->fullmove);
+}

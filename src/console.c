@@ -12,8 +12,18 @@
 #include <string.h>
 #include <stdlib.h>
 
+static Position ram_save_pos;
+static int ram_save_level = 0;
+static bool ram_save_valid = false;
+
+#if defined(__arm__) || defined(PICO_BOARD)
+static void sync_moves_from_history(const Position *pos);
+#endif
+
 #if defined(__arm__) || defined(PICO_BOARD)
 #include "pico/stdlib.h"
+#include "hardware/flash.h"
+#include "hardware/sync.h"
 #include "tm1638.h"
 #include <ctype.h>
 
@@ -31,7 +41,14 @@ static BoardMode current_board_mode = MODE_NORMAL;
 static int current_rank = 0;
 static int current_option_idx = 0;
 
-#define OPTION_COUNT 8
+#define FLASH_SAVE_OFFSET (1536 * 1024)
+typedef struct {
+    uint32_t magic;
+    char fen[256];
+    int level;
+} SaveData;
+
+#define OPTION_COUNT 10
 static const char *option_names[OPTION_COUNT] = {
     "nEU gAnE",
     "PLAy bL ",
@@ -40,7 +57,9 @@ static const char *option_names[OPTION_COUNT] = {
     "LEuEL   ",
     "SIdES   ",
     "HAlF    ",
-    "MOuES   "
+    "MOuES   ",
+    "SAuE    ",
+    "LOAd    "
 };
 
 static void update_tm1638_display(void) {
@@ -217,7 +236,9 @@ static void print_help(void) {
     printf("  new             - Start a new game from the standard starting position\n");
     printf("  board (or d)    - Display the current board state\n");
     printf("  level <depth>   - Set the engine search depth (current: %d)\n", search_depth);
-    printf("  fen <FEN>       - Set the board to a custom FEN position\n");
+    printf("  fen [FEN]       - Show current FEN or set to a custom FEN position\n");
+    printf("  save            - Save the current position and settings\n");
+    printf("  load            - Load the saved position and settings\n");
     printf("  go              - Force the engine to think and play a move\n");
     printf("  undo            - Take back the last moves (your move + computer's move)\n");
     printf("  eval            - Print the static evaluation score of the current position\n");
@@ -293,10 +314,10 @@ static void make_engine_move(Position *pos) {
     // Perform iterative deepening search
     search_position(pos, search_depth, -1);
     
-    // Retrieve best move and score from TT (scanning downwards from search_depth in case search was aborted)
+    // Retrieve best move and score from TT (scanning downwards from max depth in case search was boosted or aborted)
     Move best_move = 0;
     int score = 0;
-    for (int d = search_depth; d >= 1; d--) {
+    for (int d = 64; d >= 1; d--) {
         int dummy_score = 0;
         read_tt(pos->hash_key, d, -INFINITY_VALUE, INFINITY_VALUE, &dummy_score, &best_move);
         if (best_move != 0) {
@@ -537,6 +558,55 @@ static void get_line_custom(char *buffer, int max_len) {
                             sleep_ms(2000);
                         }
                         tm1638_display_string(option_names[current_option_idx]);
+                    } else if (current_option_idx == 8) { // Save
+                        if (current_pos_ptr) {
+                            ram_save_pos = *current_pos_ptr;
+                            ram_save_level = search_level;
+                            ram_save_valid = true;
+
+                            SaveData data;
+                            data.magic = 0xDECADE02;
+                            generate_fen(current_pos_ptr, data.fen);
+                            data.level = search_level;
+                            
+                            uint32_t ints = save_and_disable_interrupts();
+                            flash_range_erase(FLASH_SAVE_OFFSET, FLASH_SECTOR_SIZE);
+                            flash_range_program(FLASH_SAVE_OFFSET, (const uint8_t*)&data, 256);
+                            restore_interrupts(ints);
+                            
+                            tm1638_display_string("SAuEd   "); // "SAVEd"
+                            sleep_ms(1500);
+                        }
+                        current_board_mode = MODE_NORMAL;
+                        update_tm1638_display();
+                    } else if (current_option_idx == 9) { // Load
+                        if (current_pos_ptr) {
+                            const SaveData *flash_data = (const SaveData *)(0x10000000 + FLASH_SAVE_OFFSET);
+                            if (flash_data->magic == 0xDECADE02) {
+                                parse_fen(current_pos_ptr, flash_data->fen);
+                                search_level = flash_data->level;
+                                if (search_level >= 1 && search_level <= 8) {
+                                    search_depth = level_depths[search_level - 1];
+                                } else {
+                                    search_depth = 2;
+                                }
+                                sync_moves_from_history(current_pos_ptr);
+                                tm1638_display_string("LOAdEd  "); // "LOAdEd"
+                                sleep_ms(1500);
+                            } else if (ram_save_valid) {
+                                *current_pos_ptr = ram_save_pos;
+                                search_level = ram_save_level;
+                                search_depth = level_depths[search_level - 1];
+                                sync_moves_from_history(current_pos_ptr);
+                                tm1638_display_string("LOAdEd  "); // "LOAdEd"
+                                sleep_ms(1500);
+                            } else {
+                                tm1638_display_string("nO SAvE "); // "no save"
+                                sleep_ms(1500);
+                            }
+                        }
+                        current_board_mode = MODE_NORMAL;
+                        update_tm1638_display();
                     }
                 }
             }
@@ -719,12 +789,105 @@ void console_loop(void) {
         else if (strncmp(line, "fen", 3) == 0) {
             char *fen_str = line + 3;
             while (*fen_str == ' ') fen_str++;
-            parse_fen(&pos, fen_str);
-            printf("Position loaded.\n");
-            print_board(&pos);
+            if (*fen_str == '\0') {
+                char fen_buf[256];
+                generate_fen(&pos, fen_buf);
+                printf("Current FEN: %s\n", fen_buf);
+            } else {
+                parse_fen(&pos, fen_str);
+                printf("Position loaded.\n");
+                print_board(&pos);
 #if defined(__arm__) || defined(PICO_BOARD)
-            sync_moves_from_history(&pos);
+                sync_moves_from_history(&pos);
 #endif
+            }
+        } 
+        else if (strcmp(line, "save") == 0) {
+            ram_save_pos = pos;
+#if defined(__arm__) || defined(PICO_BOARD)
+            ram_save_level = search_level;
+#else
+            ram_save_level = search_depth;
+#endif
+            ram_save_valid = true;
+            printf("Position and settings saved to RAM quicksave slot.\n");
+
+#if !defined(__arm__) && !defined(PICO_BOARD)
+            FILE *f = fopen("lugalchess.save", "w");
+            if (f) {
+                char fen_buf[256];
+                generate_fen(&pos, fen_buf);
+                fprintf(f, "%s\n%d\n", fen_buf, search_depth);
+                fclose(f);
+                printf("Saved persistently to 'lugalchess.save'.\n");
+            } else {
+                printf("Error: Could not write save file.\n");
+            }
+#else
+            SaveData data;
+            data.magic = 0xDECADE02;
+            generate_fen(&pos, data.fen);
+            data.level = search_level;
+            
+            uint32_t ints = save_and_disable_interrupts();
+            flash_range_erase(FLASH_SAVE_OFFSET, FLASH_SECTOR_SIZE);
+            flash_range_program(FLASH_SAVE_OFFSET, (const uint8_t*)&data, 256);
+            restore_interrupts(ints);
+            printf("Saved persistently to QSPI flash.\n");
+#endif
+        }
+        else if (strcmp(line, "load") == 0) {
+            bool loaded = false;
+#if !defined(__arm__) && !defined(PICO_BOARD)
+            FILE *f = fopen("lugalchess.save", "r");
+            if (f) {
+                char fen_buf[256];
+                int level_val;
+                if (fgets(fen_buf, sizeof(fen_buf), f)) {
+                    fen_buf[strcspn(fen_buf, "\r\n")] = '\0';
+                    parse_fen(&pos, fen_buf);
+                    if (fscanf(f, "%d", &level_val) == 1) {
+                        search_depth = level_val;
+                    }
+                    printf("Game loaded from 'lugalchess.save'. Level set to %d.\n", search_depth);
+                    print_board(&pos);
+                    loaded = true;
+                }
+                fclose(f);
+            }
+#else
+            const SaveData *flash_data = (const SaveData *)(0x10000000 + FLASH_SAVE_OFFSET);
+            if (flash_data->magic == 0xDECADE02) {
+                parse_fen(&pos, flash_data->fen);
+                search_level = flash_data->level;
+                if (search_level >= 1 && search_level <= 8) {
+                    search_depth = level_depths[search_level - 1];
+                } else {
+                    search_depth = 2;
+                }
+                sync_moves_from_history(&pos);
+                printf("Game loaded persistently from QSPI flash. Level set to %d.\n", search_level);
+                print_board(&pos);
+                loaded = true;
+            }
+#endif
+            if (!loaded) {
+                if (ram_save_valid) {
+                    pos = ram_save_pos;
+#if defined(__arm__) || defined(PICO_BOARD)
+                    search_level = ram_save_level;
+                    search_depth = level_depths[search_level - 1];
+                    sync_moves_from_history(&pos);
+                    printf("Game loaded from RAM quicksave slot. Level set to %d.\n", search_level);
+#else
+                    search_depth = ram_save_level;
+                    printf("Game loaded from RAM quicksave slot. Level set to %d.\n", search_depth);
+#endif
+                    print_board(&pos);
+                } else {
+                    printf("No saved game found.\n");
+                }
+            }
         } 
         else if (strcmp(line, "go") == 0) {
             make_engine_move(&pos);

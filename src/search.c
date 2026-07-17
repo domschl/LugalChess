@@ -469,6 +469,16 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
         return;
     }
 
+    // Dynamically adjust search depth in endgame when there are fewer pieces
+    int piece_count = count_bits(pos->color_bbs[WHITE] | pos->color_bbs[BLACK]);
+    if (piece_count <= 6) {
+        depth += 6;
+    } else if (piece_count <= 10) {
+        depth += 4;
+    } else if (piece_count <= 16) {
+        depth += 2;
+    }
+
     start_search_time_ms = get_time_ms();
     max_search_time_ms = time_limit_ms;
     stop_search = false;

@@ -195,6 +195,30 @@ int evaluate(const Position *pos) {
     bb = b_queens; while (bb) { int sq = pop_lsb(&bb); mg_score -= (mg_value[QUEEN] + mg_psqt[QUEEN][sq ^ 56]); eg_score -= (eg_value[QUEEN] + eg_psqt[QUEEN][sq ^ 56]); }
     bb = b_king; while (bb) { int sq = pop_lsb(&bb); mg_score -= (mg_value[KING] + mg_psqt[KING][sq ^ 56]); eg_score -= (eg_value[KING] + eg_psqt[KING][sq ^ 56]); }
 
+    // Castling evaluation
+    int white_castling_bonus = 0;
+    bool white_castled = (pos->board[G1] == KING && (pos->color_bbs[WHITE] & (1ULL << F1)) && pos->board[F1] == ROOK) ||
+                         (pos->board[C1] == KING && (pos->color_bbs[WHITE] & (1ULL << D1)) && pos->board[D1] == ROOK);
+    if (white_castled) {
+        white_castling_bonus = 60;
+    } else {
+        if (pos->castling_rights & WK_CASTLE) white_castling_bonus += 30;
+        if (pos->castling_rights & WQ_CASTLE) white_castling_bonus += 30;
+    }
+
+    int black_castling_bonus = 0;
+    bool black_castled = (pos->board[G8] == KING && (pos->color_bbs[BLACK] & (1ULL << F8)) && pos->board[F8] == ROOK) ||
+                         (pos->board[C8] == KING && (pos->color_bbs[BLACK] & (1ULL << D8)) && pos->board[D8] == ROOK);
+    if (black_castled) {
+        black_castling_bonus = 60;
+    } else {
+        if (pos->castling_rights & BK_CASTLE) black_castling_bonus += 30;
+        if (pos->castling_rights & BQ_CASTLE) black_castling_bonus += 30;
+    }
+
+    mg_score += white_castling_bonus;
+    mg_score -= black_castling_bonus;
+
     // Tapered evaluation interpolation
     int score = ((mg_score * phase) + (eg_score * (24 - phase))) / 24;
 
