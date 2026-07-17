@@ -3,10 +3,11 @@
 
 #include "pico/stdlib.h"
 
-// Default GPIO Pin Mapping for QYF-TM1638 Module
-#define TM_STB_PIN  16
-#define TM_CLK_PIN  17
-#define TM_DIO_PIN  18
+// Default GPIO Pin Mapping for QYF-TM1638 Module (GP6, GP7, GP8 are safe from UART conflicts)
+#define TM_STB_PIN  6
+#define TM_CLK_PIN  7
+#define TM_DIO_PIN  8
+
 
 // Initialize GPIO pins and TM1638 chip
 void tm1638_init(void);

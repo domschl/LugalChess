@@ -42,9 +42,10 @@ target_link_libraries(lugalchess_firmware PRIVATE
 
 
 
-# Enable USB serial output and disable UART to prevent conflicts, or keep both enabled
+# Enable USB serial output and disable UART to prevent conflicts
 pico_enable_stdio_usb(lugalchess_firmware 1)
-pico_enable_stdio_uart(lugalchess_firmware 1)
+pico_enable_stdio_uart(lugalchess_firmware 0)
+
 
 # Generate UF2 output file
 pico_add_extra_outputs(lugalchess_firmware)
