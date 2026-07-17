@@ -29,9 +29,13 @@ static long get_time_ms(void) {
 }
 
 static void check_up_time(void) {
-    if (max_search_time_ms != -1 && (nodes_searched & 2047) == 0) {
-        if (get_time_ms() - start_search_time_ms >= max_search_time_ms) {
-            stop_search = true;
+    if ((nodes_searched & 2047) == 0) {
+        extern void search_poll_stop_callback(void);
+        search_poll_stop_callback();
+        if (max_search_time_ms != -1) {
+            if (get_time_ms() - start_search_time_ms >= max_search_time_ms) {
+                stop_search = true;
+            }
         }
     }
 }
@@ -263,6 +267,10 @@ int pv_search(Position *pos, int depth, int ply, int alpha, int beta, bool null_
         if (score > best_score) {
             best_score = score;
             best_move = move;
+            if (ply == 0) {
+                extern void search_progress_callback(Move move, int score, int depth);
+                search_progress_callback(best_move, best_score, depth);
+            }
         }
 
         if (score >= beta) {

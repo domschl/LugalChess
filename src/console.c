@@ -20,6 +20,29 @@
 static char last_player_move[5] = "    ";
 static char last_engine_move[5] = "    ";
 
+typedef enum {
+    MODE_NORMAL,
+    MODE_BOARD_VIEW,
+    MODE_LEVEL_SELECT,
+    MODE_OPTION_MENU
+} BoardMode;
+
+static BoardMode current_board_mode = MODE_NORMAL;
+static int current_rank = 0;
+static int current_option_idx = 0;
+
+#define OPTION_COUNT 8
+static const char *option_names[OPTION_COUNT] = {
+    "nEU gAnE",
+    "PLAy bL ",
+    "PLAy UH ",
+    "ScOrE   ",
+    "LEuEL   ",
+    "SIdES   ",
+    "HAlF    ",
+    "MOuES   "
+};
+
 static void update_tm1638_display(void) {
     char buf[9];
     // Copy player move (uppercase)
@@ -33,12 +56,111 @@ static void update_tm1638_display(void) {
     buf[8] = '\0';
     tm1638_display_string(buf);
 }
+
+static void format_score_str(int score, char *score_str) {
+    if (score > MATE_VALUE - 100) {
+        int moves = (INFINITY_VALUE - score + 1) / 2;
+        score_str[0] = 't';
+        score_str[1] = ' ';
+        score_str[2] = '0' + (moves / 10);
+        score_str[3] = '0' + (moves % 10);
+        score_str[4] = '\0';
+    } else if (score < -MATE_VALUE + 100) {
+        int moves = (INFINITY_VALUE + score + 1) / 2;
+        score_str[0] = '-';
+        score_str[1] = 't';
+        score_str[2] = '0' + (moves / 10);
+        score_str[3] = '0' + (moves % 10);
+        score_str[4] = '\0';
+    } else {
+        int abs_score = score >= 0 ? score : -score;
+        score_str[0] = score >= 0 ? '+' : '-';
+        score_str[1] = '0' + ((abs_score / 100) % 10);
+        score_str[2] = '0' + ((abs_score / 10) % 10);
+        score_str[3] = '0' + (abs_score % 10);
+        score_str[4] = '\0';
+    }
+}
+
+static void format_move_str(Move move, char *move_str) {
+    int from = MOVE_FROM(move);
+    int to = MOVE_TO(move);
+    move_str[0] = 'a' + (from % 8);
+    move_str[1] = '1' + (from / 8);
+    move_str[2] = 'a' + (to % 8);
+    move_str[3] = '1' + (to / 8);
+    move_str[4] = '\0';
+}
+
+static void show_board_rank(const Position *pos, int rank) {
+    // 1. Flash rank number first
+    char rank_name[9];
+    snprintf(rank_name, sizeof(rank_name), "rAnK  %d ", rank + 1);
+    tm1638_display_string(rank_name);
+    sleep_ms(350);
+
+    // 2. Display pieces
+    char formatted[17];
+    int f_idx = 0;
+    for (int file = 0; file < 8; file++) {
+        int sq = file + rank * 8;
+        int piece = pos->board[sq];
+        if (piece == NO_PIECE) {
+            formatted[f_idx++] = '_';
+        } else {
+            // White pieces have the decimal point lit, Black pieces do not.
+            // Pawn=P, Knight=n, Bishop=b, Rook=r, Queen=q, King=k (mapped to H in font)
+            const char piece_chars[] = "Pnbrqk";
+            formatted[f_idx++] = piece_chars[piece];
+            int color = pos->color_bbs[WHITE] & (1ULL << sq) ? WHITE : BLACK;
+            if (color == WHITE) {
+                formatted[f_idx++] = '.'; // Add decimal point for White
+            }
+        }
+    }
+    formatted[f_idx] = '\0';
+    tm1638_display_string(formatted);
+}
+
+// Progress callback for updating the screen during engine search
+void search_progress_callback(Move move, int score, int depth) {
+    if (move == 0) return;
+    char move_str[5];
+    char score_str[5];
+    format_move_str(move, move_str);
+    format_score_str(score, score_str);
+    
+    char buf[9];
+    for (int i = 0; i < 4; i++) {
+        buf[i] = toupper((unsigned char)move_str[i]);
+        buf[i + 4] = toupper((unsigned char)score_str[i]);
+    }
+    buf[8] = '\0';
+    tm1638_display_string(buf);
+}
+
+// Poll key to abort search
+void search_poll_stop_callback(void) {
+    int key = tm1638_get_key();
+    if (key == 11) { // Key 11 is the STOP button
+        stop_search = true;
+    }
+}
+
+// Current Position pointer for menu evaluations
+static Position *current_pos_ptr = NULL;
+#else
+// Dummy search callbacks for host build
+void search_progress_callback(Move move, int score, int depth) {}
+void search_poll_stop_callback(void) {}
 #endif
 
 
 // Default search depth: lower on firmware to reduce stack usage
 #if defined(__arm__) || defined(PICO_BOARD)
-static int search_depth = 2;
+static int search_level = 2;
+static const int level_depths[8] = { 1, 2, 3, 5, 7, 9, 11, 13 };
+static int search_depth = 2; // dynamically set: search_depth = level_depths[search_level - 1]
 #else
 static int search_depth = 5;
 #endif
@@ -105,18 +227,20 @@ static void make_engine_move(Position *pos) {
     printf("Engine is thinking (depth %d)...\n", search_depth);
     fflush(stdout);
 
-    // Call search
-    // We redirect the stdout of search temporarily or let it print UCI style info.
-    // To make it clean, we search and retrieve the best move from the TT.
-    increment_tt_age();
+    // Perform iterative deepening search
+    search_position(pos, search_depth, -1);
     
-    // Perform search
-    int score = pv_search(pos, search_depth, 0, -INFINITY_VALUE, INFINITY_VALUE, true);
-    
-    // Retrieve move from TT
+    // Retrieve best move and score from TT (scanning downwards from search_depth in case search was aborted)
     Move best_move = 0;
-    int dummy_score;
-    read_tt(pos->hash_key, search_depth, -INFINITY_VALUE, INFINITY_VALUE, &dummy_score, &best_move);
+    int score = 0;
+    for (int d = search_depth; d >= 1; d--) {
+        int dummy_score = 0;
+        read_tt(pos->hash_key, d, -INFINITY_VALUE, INFINITY_VALUE, &dummy_score, &best_move);
+        if (best_move != 0) {
+            score = dummy_score;
+            break;
+        }
+    }
     
     if (best_move != 0) {
         int from = MOVE_FROM(best_move);
@@ -163,42 +287,195 @@ static void get_line_custom(char *buffer, int max_len) {
             // Key press debouncing
             sleep_ms(250);
 
-            // Determine character type and append if valid
-            if (key >= 0 && key <= 7) {
-                // Keys 0..7 map to Files 'a' through 'h'
-                char file_char = 'a' + key;
-                if (keypad_len == 0 || keypad_len == 2) {
-                    keypad_input[keypad_len++] = file_char;
-                    keypad_input[keypad_len] = '\0';
+            if (current_board_mode == MODE_NORMAL) {
+                // S1..S8: input keys A/1 to H/8
+                if (key >= 0 && key <= 7) {
+                    if (keypad_len == 0 || keypad_len == 2) {
+                        char file_char = 'a' + key;
+                        keypad_input[keypad_len++] = file_char;
+                        keypad_input[keypad_len] = '\0';
+                    } else if (keypad_len == 1 || keypad_len == 3) {
+                        char rank_char = '1' + key;
+                        keypad_input[keypad_len++] = rank_char;
+                        keypad_input[keypad_len] = '\0';
+                    }
+
+                    // Sync with display state
+                    for (int i = 0; i < 4; i++) {
+                        last_player_move[i] = (i < keypad_len) ? keypad_input[i] : ' ';
+                    }
+                    strcpy(last_engine_move, "    ");
+                    update_tm1638_display();
+
+                    if (keypad_len == 4) {
+                        strcpy(buffer, keypad_input);
+                        keypad_len = 0;
+                        keypad_input[0] = '\0';
+                        printf("%s\n", buffer);
+                        fflush(stdout);
+                        return;
+                    }
                 }
-            } else if (key >= 8 && key <= 15) {
-                // Keys 8..15 map to Ranks '1' through '8'
-                char rank_char = '1' + (key - 8);
-                if (keypad_len == 1 || keypad_len == 3) {
-                    keypad_input[keypad_len++] = rank_char;
-                    keypad_input[keypad_len] = '\0';
+                // S9: Back key -> Undo
+                else if (key == 8) {
+                    strcpy(buffer, "undo");
+                    printf("undo\n");
+                    fflush(stdout);
+                    return;
+                }
+                // S11: Board key -> Enter board view
+                else if (key == 10) {
+                    current_board_mode = MODE_BOARD_VIEW;
+                    current_rank = 0;
+                    if (current_pos_ptr) {
+                        show_board_rank(current_pos_ptr, current_rank);
+                    }
+                }
+                // S12: Stop key -> Clear typing progress
+                else if (key == 11) {
+                    keypad_len = 0;
+                    keypad_input[0] = '\0';
+                    strcpy(last_player_move, "    ");
+                    update_tm1638_display();
+                }
+                // S13: Lvl key -> Choose depth
+                else if (key == 12) {
+                    current_board_mode = MODE_LEVEL_SELECT;
+                    char buf[9];
+                    snprintf(buf, sizeof(buf), "L-%02d    ", search_level);
+                    tm1638_display_string(buf);
+                }
+                // S14: Anal key -> Trigger search
+                else if (key == 13) {
+                    strcpy(buffer, "go");
+                    printf("go\n");
+                    fflush(stdout);
+                    return;
+                }
+                // S15: Opt key -> Options menu
+                else if (key == 14) {
+                    current_board_mode = MODE_OPTION_MENU;
+                    current_option_idx = 0;
+                    tm1638_display_string(option_names[current_option_idx]);
                 }
             }
-
-            // Sync with display state
-            for (int i = 0; i < 4; i++) {
-                last_player_move[i] = (i < keypad_len) ? keypad_input[i] : ' ';
+            else if (current_board_mode == MODE_BOARD_VIEW) {
+                // Back key (8) -> Scroll rank up
+                if (key == 8) {
+                    if (current_rank < 7) {
+                        current_rank++;
+                        if (current_pos_ptr) show_board_rank(current_pos_ptr, current_rank);
+                    }
+                }
+                // Fwrd key (9) -> Scroll rank down
+                else if (key == 9) {
+                    if (current_rank > 0) {
+                        current_rank--;
+                        if (current_pos_ptr) show_board_rank(current_pos_ptr, current_rank);
+                    }
+                }
+                // Stop key (11) -> Exit board view
+                else if (key == 11) {
+                    current_board_mode = MODE_NORMAL;
+                    update_tm1638_display();
+                }
             }
-            strcpy(last_engine_move, "    ");
-            update_tm1638_display();
-
-            if (keypad_len == 4) {
-                // Copy to return buffer
-                strcpy(buffer, keypad_input);
-                
-                // Clear state for next move
-                keypad_len = 0;
-                keypad_input[0] = '\0';
-
-                // Print to standard output so it mirrors on USB terminal
-                printf("%s\n", buffer);
-                fflush(stdout);
-                return;
+            else if (current_board_mode == MODE_LEVEL_SELECT) {
+                // S1..S8: select level 1-8
+                if (key >= 0 && key <= 7) {
+                    search_level = key + 1;
+                    search_depth = level_depths[search_level - 1];
+                    char buf[9];
+                    snprintf(buf, sizeof(buf), "L-%02d    ", search_level);
+                    tm1638_display_string(buf);
+                }
+                // Stop key (11) -> Cancel
+                else if (key == 11) {
+                    current_board_mode = MODE_NORMAL;
+                    update_tm1638_display();
+                }
+                // Enter key (15) -> Confirm
+                else if (key == 15) {
+                    current_board_mode = MODE_NORMAL;
+                    update_tm1638_display();
+                }
+            }
+            else if (current_board_mode == MODE_OPTION_MENU) {
+                // Back key (8) -> Previous option
+                if (key == 8) {
+                    current_option_idx = (current_option_idx - 1 + OPTION_COUNT) % OPTION_COUNT;
+                    tm1638_display_string(option_names[current_option_idx]);
+                }
+                // Fwrd key (9) -> Next option
+                else if (key == 9) {
+                    current_option_idx = (current_option_idx + 1) % OPTION_COUNT;
+                    tm1638_display_string(option_names[current_option_idx]);
+                }
+                // Stop key (11) -> Cancel
+                else if (key == 11) {
+                    current_board_mode = MODE_NORMAL;
+                    update_tm1638_display();
+                }
+                // Enter key (15) -> Confirm selection
+                else if (key == 15) {
+                    if (current_option_idx == 0) { // New game
+                        current_board_mode = MODE_NORMAL;
+                        strcpy(buffer, "new");
+                        printf("new\n");
+                        fflush(stdout);
+                        return;
+                    } else if (current_option_idx == 1) { // Play Black
+                        current_board_mode = MODE_NORMAL;
+                        update_tm1638_display();
+                        // No immediate engine move required (player is White)
+                    } else if (current_option_idx == 2) { // Play White
+                        current_board_mode = MODE_NORMAL;
+                        strcpy(buffer, "go");
+                        printf("go\n");
+                        fflush(stdout);
+                        return;
+                    } else if (current_option_idx == 3) { // Score
+                        if (current_pos_ptr) {
+                            int score = evaluate(current_pos_ptr);
+                            char score_str[5];
+                            format_score_str(score, score_str);
+                            char buf[9];
+                            snprintf(buf, sizeof(buf), "ScO %s", score_str);
+                            tm1638_display_string(buf);
+                            sleep_ms(2000);
+                        }
+                        tm1638_display_string(option_names[current_option_idx]);
+                    } else if (current_option_idx == 4) { // Level
+                        current_board_mode = MODE_LEVEL_SELECT;
+                        char buf[9];
+                        snprintf(buf, sizeof(buf), "L-%02d    ", search_level);
+                        tm1638_display_string(buf);
+                    } else if (current_option_idx == 5) { // Side
+                        if (current_pos_ptr) {
+                            char buf[9];
+                            snprintf(buf, sizeof(buf), "SIdE %s", current_pos_ptr->side == WHITE ? "WH" : "bL");
+                            tm1638_display_string(buf);
+                            sleep_ms(2000);
+                        }
+                        tm1638_display_string(option_names[current_option_idx]);
+                    } else if (current_option_idx == 6) { // Halfmove
+                        if (current_pos_ptr) {
+                            char buf[9];
+                            snprintf(buf, sizeof(buf), "H- %02d   ", current_pos_ptr->halfmove);
+                            tm1638_display_string(buf);
+                            sleep_ms(2000);
+                        }
+                        tm1638_display_string(option_names[current_option_idx]);
+                    } else if (current_option_idx == 7) { // Move count
+                        if (current_pos_ptr) {
+                            char buf[9];
+                            snprintf(buf, sizeof(buf), "n- %02d   ", current_pos_ptr->history_ply);
+                            tm1638_display_string(buf);
+                            sleep_ms(2000);
+                        }
+                        tm1638_display_string(option_names[current_option_idx]);
+                    }
+                }
             }
         }
 
@@ -241,6 +518,22 @@ static void get_line_custom(char *buffer, int max_len) {
     }
 }
 
+#if defined(__arm__) || defined(PICO_BOARD)
+static void sync_moves_from_history(const Position *pos) {
+    if (pos->history_ply >= 2) {
+        format_move_str(pos->history[pos->history_ply - 2].move, last_player_move);
+        format_move_str(pos->history[pos->history_ply - 1].move, last_engine_move);
+    } else if (pos->history_ply == 1) {
+        format_move_str(pos->history[pos->history_ply - 1].move, last_player_move);
+        strcpy(last_engine_move, "    ");
+    } else {
+        strcpy(last_player_move, "    ");
+        strcpy(last_engine_move, "    ");
+    }
+    update_tm1638_display();
+}
+#endif
+
 void console_loop(void) {
     // Initialize Transposition Table (safely allocate 32KB on microcontrollers, 16MB on host)
 #if defined(__arm__) || defined(PICO_BOARD)
@@ -251,6 +544,9 @@ void console_loop(void) {
 
 
     Position pos;
+#if defined(__arm__) || defined(PICO_BOARD)
+    current_pos_ptr = &pos;
+#endif
     parse_fen(&pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
 
     printf("=========================================\n");
@@ -284,6 +580,9 @@ void console_loop(void) {
             parse_fen(&pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
             printf("New game started.\n");
             print_board(&pos);
+#if defined(__arm__) || defined(PICO_BOARD)
+            sync_moves_from_history(&pos);
+#endif
         } 
         else if (strcmp(line, "board") == 0 || strcmp(line, "d") == 0) {
             print_board(&pos);
@@ -294,6 +593,16 @@ void console_loop(void) {
             if (val >= 1 && val <= 64) {
                 search_depth = val;
                 printf("Search depth set to %d.\n", search_depth);
+#if defined(__arm__) || defined(PICO_BOARD)
+                // Try to find corresponding level 1-8
+                search_level = 0;
+                for (int i = 0; i < 8; i++) {
+                    if (level_depths[i] == val) {
+                        search_level = i + 1;
+                        break;
+                    }
+                }
+#endif
             } else {
                 printf("Invalid level. Please specify depth between 1 and 64.\n");
             }
@@ -304,6 +613,9 @@ void console_loop(void) {
             parse_fen(&pos, fen_str);
             printf("Position loaded.\n");
             print_board(&pos);
+#if defined(__arm__) || defined(PICO_BOARD)
+            sync_moves_from_history(&pos);
+#endif
         } 
         else if (strcmp(line, "go") == 0) {
             make_engine_move(&pos);
@@ -323,6 +635,9 @@ void console_loop(void) {
             } else {
                 printf("Nothing to undo.\n");
             }
+#if defined(__arm__) || defined(PICO_BOARD)
+            sync_moves_from_history(&pos);
+#endif
         } 
         else if (strcmp(line, "eval") == 0) {
             int score = evaluate(&pos);
