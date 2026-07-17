@@ -111,3 +111,33 @@ This compiles and links `lugalchess_firmware.uf2`.
    picocom -b 115200 /dev/ttyACM0
    ```
    *(The boot screen and chessboard will display immediately upon connection, and you can play directly by typing moves!)*
+
+---
+
+## 📺 3. QYF-TM1638 Display & Keypad Interface
+
+LugalChess includes a native driver for the **QYF-TM1638** module, which combines 8 seven-segment displays, 8 individual LEDs, and a 4x4 matrix keyboard (16 keys total). This allows for a completely standalone chess computer experience.
+
+### 🔌 Hardware Pinout (RP2350 -> TM1638)
+
+Connect the TM1638 module to your Pico 2 using the following GPIO mapping:
+
+* **VCC** ➡️ `5V` (or `3.3V` VBUS pin)
+* **GND** ➡️ `GND`
+* **STB** ➡️ `GP16` (Pin 21)
+* **CLK** ➡️ `GP17` (Pin 22)
+* **DIO** ➡️ `GP18` (Pin 24)
+
+### ⌨️ Keypad Mapping
+
+The 16-key keypad maps directly to chess files and ranks, allowing you to enter moves as 4-key sequences (e.g. `E` ➡️ `2` ➡️ `E` ➡️ `4` to play `e2e4`):
+
+* **Files ('a' to 'h')**: Mapped to keys **0 to 7** (typically the first two rows: `1`, `2`, `3`, `A`, `4`, `5`, `6`, `B`).
+* **Ranks ('1' to '8')**: Mapped to keys **8 to 15** (typically the last two rows: `7`, `8`, `9`, `C`, `*`, `0`, `#`, `D`).
+
+### ⚙️ Parallel Execution Model
+
+* **Core 1 (Secondary Core)**: Scans the TM1638 keypad, handles debouncing, drives the 7-segment display (showing your move progress on the left, and the engine's reply on the right), and blinks the LEDs.
+* **Core 0 (Primary Core)**: Runs the main PVS search tree. 
+* **Inter-Core Communication**: Utilizes the RP2350 hardware FIFO queues to exchange move inputs, meaning you can enter moves via the physical keypad and the PC serial console simultaneously!
+
