@@ -462,6 +462,12 @@ static void get_line_custom(char *buffer, int max_len) {
             // Key press debouncing
             sleep_ms(250);
 
+            if (game_status_msg[0] != '\0') {
+                strcpy(game_status_msg, "");
+                display_show_moves = true;
+                update_tm1638_display();
+            }
+
             if (current_board_mode == MODE_NORMAL) {
                 // S1..S8: input keys A/1 to H/8
                 if (key >= 0 && key <= 7) {
@@ -767,6 +773,14 @@ static void get_line_custom(char *buffer, int max_len) {
             continue;
         }
 
+#if defined(__arm__) || defined(PICO_BOARD)
+        if (game_status_msg[0] != '\0') {
+            strcpy(game_status_msg, "");
+            display_show_moves = true;
+            update_tm1638_display();
+        }
+#endif
+
         
         // Handle newline / carriage return
         if (c == '\r' || c == '\n') {
@@ -936,7 +950,10 @@ void console_loop(void) {
             printf("New game started.\n");
             print_board(&pos);
 #if defined(__arm__) || defined(PICO_BOARD)
+            strcpy(game_status_msg, "");
+            display_show_moves = true;
             sync_moves_from_history(&pos);
+            update_tm1638_display();
 #endif
         } 
         else if (strcmp(line, "board") == 0 || strcmp(line, "d") == 0) {
