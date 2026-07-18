@@ -25,10 +25,21 @@ static void sync_moves_from_history(const Position *pos);
 #include "hardware/flash.h"
 #include "hardware/sync.h"
 #include "tm1638.h"
+#include "st7735.h"
 #include <ctype.h>
 
-static char last_player_move[5] = "    ";
-static char last_engine_move[5] = "    ";
+static char last_player_move[6] = "     ";
+static char last_engine_move[6] = "     ";
+static Position *current_pos_ptr = NULL;
+static int search_level = 2;
+static const int level_depths[8] = { 1, 2, 3, 5, 7, 9, 11, 13 };
+static int search_depth = 2;
+static char game_status_msg[9] = "";
+static bool display_show_moves = true;
+static uint32_t last_normal_toggle_ms = 0;
+static int game_side_to_move = WHITE;
+static bool show_thinking_board = false;
+static uint32_t last_thinking_board_update_ms = 0;
 
 typedef enum {
     MODE_NORMAL,
@@ -44,7 +55,7 @@ static int current_option_idx = 0;
 #define FLASH_SAVE_OFFSET (1536 * 1024)
 typedef struct {
     uint32_t magic;
-    char fen[256];
+    char fen[220];
     int level;
 } SaveData;
 
@@ -64,16 +75,36 @@ static const char *option_names[OPTION_COUNT] = {
 
 static void update_tm1638_display(void) {
     char buf[9];
-    // Copy player move (uppercase)
-    for (int i = 0; i < 4; i++) {
-        buf[i] = last_player_move[i] ? toupper((unsigned char)last_player_move[i]) : ' ';
+    // Copy player move
+    if (last_player_move[4] != '\0' && last_player_move[4] != ' ') {
+        buf[0] = toupper((unsigned char)last_player_move[0]);
+        buf[1] = toupper((unsigned char)last_player_move[1]);
+        buf[2] = toupper((unsigned char)last_player_move[2]);
+        buf[3] = toupper((unsigned char)last_player_move[4]);
+    } else {
+        for (int i = 0; i < 4; i++) {
+            buf[i] = last_player_move[i] ? toupper((unsigned char)last_player_move[i]) : ' ';
+        }
     }
-    // Copy engine move (uppercase)
-    for (int i = 0; i < 4; i++) {
-        buf[i + 4] = last_engine_move[i] ? toupper((unsigned char)last_engine_move[i]) : ' ';
+    // Copy engine move
+    if (last_engine_move[4] != '\0' && last_engine_move[4] != ' ') {
+        buf[4] = toupper((unsigned char)last_engine_move[0]);
+        buf[5] = toupper((unsigned char)last_engine_move[1]);
+        buf[6] = toupper((unsigned char)last_engine_move[2]);
+        buf[7] = toupper((unsigned char)last_engine_move[4]);
+    } else {
+        for (int i = 0; i < 4; i++) {
+            buf[i + 4] = last_engine_move[i] ? toupper((unsigned char)last_engine_move[i]) : ' ';
+        }
     }
     buf[8] = '\0';
     tm1638_display_string(buf);
+
+    if (current_pos_ptr) {
+        game_side_to_move = current_pos_ptr->side;
+        st7735_draw_board(current_pos_ptr);
+        st7735_draw_status(current_pos_ptr, search_level, game_side_to_move, last_player_move, last_engine_move, game_status_msg);
+    }
 }
 
 static void format_score_str(int score, char *score_str) {
@@ -108,7 +139,14 @@ static void format_move_str(Move move, char *move_str) {
     move_str[1] = '1' + (from / 8);
     move_str[2] = 'a' + (to % 8);
     move_str[3] = '1' + (to / 8);
-    move_str[4] = '\0';
+    if (move_is_promo(move)) {
+        int promo = move_promo_piece(move);
+        const char promo_chars[] = "  pnbrqk";
+        move_str[4] = promo_chars[promo];
+        move_str[5] = '\0';
+    } else {
+        move_str[4] = '\0';
+    }
 }
 
 static void show_board_rank(const Position *pos, int rank) {
@@ -148,7 +186,7 @@ static uint32_t last_display_toggle_ms = 0;
 static bool display_show_score = true;
 
 static void update_thinking_display(void) {
-    char move_str[5];
+    char move_str[6];
     if (current_search_best_move != 0) {
         format_move_str(current_search_best_move, move_str);
     } else {
@@ -173,6 +211,18 @@ static void update_thinking_display(void) {
     }
     buf[8] = '\0';
     tm1638_display_string(buf);
+
+#if defined(__arm__) || defined(PICO_BOARD)
+    if (current_pos_ptr) {
+        char think_buf[16];
+        if (current_search_best_move != 0) {
+            snprintf(think_buf, sizeof(think_buf), "THINK:%s L%d", move_str, current_search_depth);
+        } else {
+            snprintf(think_buf, sizeof(think_buf), "THINKING L%d", current_search_depth);
+        }
+        st7735_draw_status(current_pos_ptr, search_level, game_side_to_move, last_player_move, last_engine_move, think_buf);
+    }
+#endif
 }
 
 // Progress callback for updating the screen during engine search
@@ -184,6 +234,8 @@ void search_progress_callback(Move move, int score, int depth) {
         current_search_depth = 1;
         display_show_score = true;
         last_display_toggle_ms = time_us_32() / 1000;
+        show_thinking_board = false;
+        last_thinking_board_update_ms = 0;
     }
     
     if (move != 0) {
@@ -201,9 +253,25 @@ void search_poll_stop_callback(void) {
     if (key == 11) {
         stop_search = true;
     }
+    else if (key == 10) { // Board key
+        show_thinking_board = !show_thinking_board;
+        sleep_ms(250); // Debounce board key
+        if (current_pos_ptr) {
+            st7735_draw_board(current_pos_ptr);
+        }
+    }
     
-    // Alternating display toggle every 1000 ms
     uint32_t now_ms = time_us_32() / 1000;
+    
+    // If show_thinking_board is active, update the board rendering every 500 ms
+    if (show_thinking_board && current_pos_ptr) {
+        if (now_ms - last_thinking_board_update_ms >= 500) {
+            st7735_draw_board(current_pos_ptr);
+            last_thinking_board_update_ms = now_ms;
+        }
+    }
+
+    // Alternating display toggle every 1000 ms
     if (now_ms - last_display_toggle_ms >= 1000) {
         display_show_score = !display_show_score;
         last_display_toggle_ms = now_ms;
@@ -212,7 +280,6 @@ void search_poll_stop_callback(void) {
 }
 
 // Current Position pointer for menu evaluations
-static Position *current_pos_ptr = NULL;
 #else
 // Dummy search callbacks for host build
 void search_progress_callback(Move move, int score, int depth) {}
@@ -221,11 +288,7 @@ void search_poll_stop_callback(void) {}
 
 
 // Default search depth: lower on firmware to reduce stack usage
-#if defined(__arm__) || defined(PICO_BOARD)
-static int search_level = 2;
-static const int level_depths[8] = { 1, 2, 3, 5, 7, 9, 11, 13 };
-static int search_depth = 2; // dynamically set: search_depth = level_depths[search_level - 1]
-#else
+#if !defined(__arm__) && !defined(PICO_BOARD)
 static int search_depth = 5;
 #endif
 
@@ -345,7 +408,14 @@ static void make_engine_move(Position *pos) {
         last_engine_move[1] = '1' + (from / 8);
         last_engine_move[2] = 'a' + (to % 8);
         last_engine_move[3] = '1' + (to / 8);
-        last_engine_move[4] = '\0';
+        if (move_is_promo(best_move)) {
+            int promo = move_promo_piece(best_move);
+            const char promo_chars[] = "  pnbrqk";
+            last_engine_move[4] = promo_chars[promo];
+            last_engine_move[5] = '\0';
+        } else {
+            last_engine_move[4] = '\0';
+        }
         update_tm1638_display();
 #endif
 
@@ -354,11 +424,32 @@ static void make_engine_move(Position *pos) {
     }
 }
 
+#if defined(__arm__) || defined(PICO_BOARD)
+
+static bool is_player_move_promotion(const char *move_str) {
+    if (!current_pos_ptr) return false;
+    if (move_str[0] < 'a' || move_str[0] > 'h' || move_str[1] < '1' || move_str[1] > '8' ||
+        move_str[2] < 'a' || move_str[2] > 'h' || move_str[3] < '1' || move_str[3] > '8') {
+        return false;
+    }
+    int from = (move_str[0] - 'a') + (move_str[1] - '1') * 8;
+    int to = (move_str[2] - 'a') + (move_str[3] - '1') * 8;
+    
+    if (current_pos_ptr->board[from] != PAWN) return false;
+    
+    int us = current_pos_ptr->color_bbs[WHITE] & (1ULL << from) ? WHITE : BLACK;
+    if (us == WHITE && to / 8 == 7) return true;
+    if (us == BLACK && to / 8 == 0) return true;
+    
+    return false;
+}
+#endif
+
 // Portable line reader that echos characters, handles backspace/delete, and handles \r/\n
 static void get_line_custom(char *buffer, int max_len) {
     int len = 0;
 #if defined(__arm__) || defined(PICO_BOARD)
-    static char keypad_input[5] = "";
+    static char keypad_input[6] = "";
     static int keypad_len = 0;
 #endif
 
@@ -392,6 +483,44 @@ static void get_line_custom(char *buffer, int max_len) {
                     update_tm1638_display();
 
                     if (keypad_len == 4) {
+                        if (is_player_move_promotion(keypad_input)) {
+                            tm1638_display_string("1n2b3r4q");
+                            // Wait for key release first
+                            while (tm1638_get_key() != -1) {
+                                sleep_ms(10);
+                            }
+                            // Wait for key press
+                            int choice_key = -1;
+                            while (choice_key == -1) {
+                                choice_key = tm1638_get_key();
+                                sleep_ms(10);
+                            }
+                            char promo_char = 'q'; // Default to Queen
+                            if (choice_key == 0) promo_char = 'n';
+                            else if (choice_key == 1) promo_char = 'b';
+                            else if (choice_key == 2) promo_char = 'r';
+                            else if (choice_key == 3) promo_char = 'q';
+                            
+                            keypad_input[4] = promo_char;
+                            keypad_input[5] = '\0';
+                            keypad_len = 5;
+                            
+                            // Wait for key release again
+                            while (tm1638_get_key() != -1) {
+                                sleep_ms(10);
+                            }
+                        } else {
+                            keypad_input[4] = '\0';
+                            keypad_len = 4;
+                        }
+
+                        // Copy full moves (including promotion suffix)
+                        for (int i = 0; i < 5; i++) {
+                            last_player_move[i] = (i < keypad_len) ? keypad_input[i] : '\0';
+                        }
+                        strcpy(last_engine_move, "     ");
+                        update_tm1638_display();
+
                         strcpy(buffer, keypad_input);
                         keypad_len = 0;
                         keypad_input[0] = '\0';
@@ -588,7 +717,8 @@ static void get_line_custom(char *buffer, int max_len) {
                                 if (search_level >= 1 && search_level <= 8) {
                                     search_depth = level_depths[search_level - 1];
                                 } else {
-                                    search_depth = 2;
+                                    search_level = 2;
+                                    search_depth = level_depths[search_level - 1];
                                 }
                                 sync_moves_from_history(current_pos_ptr);
                                 tm1638_display_string("LOAdEd  "); // "LOAdEd"
@@ -615,6 +745,18 @@ static void get_line_custom(char *buffer, int max_len) {
         // 2. Poll USB serial with 10ms timeout
         c = getchar_timeout_us(10000);
         if (c == PICO_ERROR_TIMEOUT) {
+            if (current_board_mode == MODE_NORMAL && game_status_msg[0] != '\0') {
+                uint32_t now_ms = time_us_32() / 1000;
+                if (now_ms - last_normal_toggle_ms >= 1000) {
+                    display_show_moves = !display_show_moves;
+                    last_normal_toggle_ms = now_ms;
+                    if (display_show_moves) {
+                        update_tm1638_display();
+                    } else {
+                        tm1638_display_string(game_status_msg);
+                    }
+                }
+            }
             continue;
         }
 #else
@@ -667,6 +809,24 @@ static void sync_moves_from_history(const Position *pos) {
 }
 #endif
 
+static void check_and_update_check_status(Position *pos) {
+#if defined(__arm__) || defined(PICO_BOARD)
+    int in_check = is_square_attacked(pos, get_lsb(pos->piece_bbs[KING] & pos->color_bbs[pos->side]), pos->side ^ 1);
+    if (in_check) {
+        strcpy(game_status_msg, "CHk     ");
+        display_show_moves = false;
+        last_normal_toggle_ms = time_us_32() / 1000;
+        tm1638_display_string(game_status_msg);
+    } else {
+        strcpy(game_status_msg, "");
+        display_show_moves = true;
+        update_tm1638_display();
+    }
+#else
+    (void)pos;
+#endif
+}
+
 static bool check_and_display_game_over(Position *pos) {
     MoveList list;
     generate_moves(pos, &list);
@@ -685,18 +845,27 @@ static bool check_and_display_game_over(Position *pos) {
             if (pos->side == WHITE) {
                 printf("\nCheckmate! Black wins!\n");
 #if defined(__arm__) || defined(PICO_BOARD)
-                tm1638_display_string("nAtE bL "); // "mate bl"
+                strcpy(game_status_msg, "nAtE bL ");
+                display_show_moves = false;
+                last_normal_toggle_ms = time_us_32() / 1000;
+                tm1638_display_string(game_status_msg);
 #endif
             } else {
                 printf("\nCheckmate! White wins!\n");
 #if defined(__arm__) || defined(PICO_BOARD)
-                tm1638_display_string("nAtE UH "); // "mate wh"
+                strcpy(game_status_msg, "nAtE UH ");
+                display_show_moves = false;
+                last_normal_toggle_ms = time_us_32() / 1000;
+                tm1638_display_string(game_status_msg);
 #endif
             }
         } else {
             printf("\nStalemate! Game is a draw.\n");
 #if defined(__arm__) || defined(PICO_BOARD)
-            tm1638_display_string("drAU    "); // "draw"
+            strcpy(game_status_msg, "drAU    ");
+            display_show_moves = false;
+            last_normal_toggle_ms = time_us_32() / 1000;
+            tm1638_display_string(game_status_msg);
 #endif
         }
         return true;
@@ -705,7 +874,10 @@ static bool check_and_display_game_over(Position *pos) {
     if (pos->halfmove >= 100) {
         printf("\nDraw by 50-move rule.\n");
 #if defined(__arm__) || defined(PICO_BOARD)
-        tm1638_display_string("drAU    ");
+        strcpy(game_status_msg, "drAU    ");
+        display_show_moves = false;
+        last_normal_toggle_ms = time_us_32() / 1000;
+        tm1638_display_string(game_status_msg);
 #endif
         return true;
     }
@@ -734,6 +906,10 @@ void console_loop(void) {
     printf("Type 'help' for a list of commands.\n\n");
 
     print_board(&pos);
+
+#if defined(__arm__) || defined(PICO_BOARD)
+    update_tm1638_display();
+#endif
 
     char line[512];
     while (1) {
@@ -863,9 +1039,13 @@ void console_loop(void) {
                 if (search_level >= 1 && search_level <= 8) {
                     search_depth = level_depths[search_level - 1];
                 } else {
-                    search_depth = 2;
+                    search_level = 2;
+                    search_depth = level_depths[search_level - 1];
                 }
                 sync_moves_from_history(&pos);
+                if (!check_and_display_game_over(&pos)) {
+                    check_and_update_check_status(&pos);
+                }
                 printf("Game loaded persistently from QSPI flash. Level set to %d.\n", search_level);
                 print_board(&pos);
                 loaded = true;
@@ -878,6 +1058,9 @@ void console_loop(void) {
                     search_level = ram_save_level;
                     search_depth = level_depths[search_level - 1];
                     sync_moves_from_history(&pos);
+                    if (!check_and_display_game_over(&pos)) {
+                        check_and_update_check_status(&pos);
+                    }
                     printf("Game loaded from RAM quicksave slot. Level set to %d.\n", search_level);
 #else
                     search_depth = ram_save_level;
@@ -909,6 +1092,9 @@ void console_loop(void) {
             }
 #if defined(__arm__) || defined(PICO_BOARD)
             sync_moves_from_history(&pos);
+            if (!check_and_display_game_over(&pos)) {
+                check_and_update_check_status(&pos);
+            }
 #endif
         } 
         else if (strcmp(line, "eval") == 0) {
@@ -947,21 +1133,22 @@ void console_loop(void) {
             // Try to parse input as a player move
             if (execute_player_move(&pos, line)) {
 #if defined(__arm__) || defined(PICO_BOARD)
-                strncpy(last_player_move, line, 4);
-                last_player_move[4] = '\0';
-                strcpy(last_engine_move, "    ");
+                strncpy(last_player_move, line, 5);
+                last_player_move[5] = '\0';
+                strcpy(last_engine_move, "     ");
                 update_tm1638_display();
 #endif
                 print_board(&pos);
 
-                
                 // Check if game is over
                 if (!check_and_display_game_over(&pos)) {
                     // Trigger engine move
                     make_engine_move(&pos);
                     print_board(&pos);
                     // Check if engine's move ended the game
-                    check_and_display_game_over(&pos);
+                    if (!check_and_display_game_over(&pos)) {
+                        check_and_update_check_status(&pos);
+                    }
                 }
             } else {
                 printf("Unknown command or invalid move: '%s'. Type 'help' for instructions.\n", line);

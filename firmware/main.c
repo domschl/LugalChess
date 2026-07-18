@@ -8,6 +8,7 @@
 #include "zobrist.h"
 #include "console.h"
 #include "tm1638.h"
+#include "st7735.h"
 
 int main() {
     // Initialize stdio
@@ -25,6 +26,9 @@ int main() {
 
     // Initialize TM1638 module directly on Core 0
     tm1638_init();
+
+    // Initialize ST7735 TFT display module
+    st7735_init();
 
     // Show splash string "LUgAL CH" (LugalChess) on boot
     tm1638_display_string("LUgAL CH");

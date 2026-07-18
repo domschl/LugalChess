@@ -15,6 +15,7 @@ pico_sdk_init()
 add_executable(lugalchess_firmware
     main.c
     tm1638.c
+    st7735.c
     ../src/bitboard.c
     ../src/position.c
     ../src/movegen.c
@@ -39,6 +40,7 @@ target_compile_definitions(lugalchess_firmware PRIVATE USE_MAGIC_BITBOARDS=0)
 target_link_libraries(lugalchess_firmware PRIVATE
     pico_stdlib
     pico_multicore
+    hardware_spi
 )
 
 

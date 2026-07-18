@@ -128,6 +128,18 @@ Connect the TM1638 module to your Pico 2 using the following GPIO mapping (defin
 * **CLK** ➡️ `GP7` (Pin 10)
 * **DIO** ➡️ `GP8` (Pin 11)
 
+### 📺 Hardware Pinout (RP2350 -> 1.8" ST7735 TFT LCD)
+
+Connect the ST7735-based 1.8" SPI TFT screen using the following GPIO mapping (defined in `firmware/st7735.h`):
+
+* **VCC & LED** ➡️ `3.3V` (logic power & backlight)
+* **GND** ➡️ `GND`
+* **SCL/SCK** ➡️ `GP18` (Pin 24, SPI0 SCK)
+* **SDA/MOSI** ➡️ `GP19` (Pin 25, SPI0 TX)
+* **CS** ➡️ `GP17` (Pin 22, SPI0 CS)
+* **D/C (A0)** ➡️ `GP20` (Pin 26, Data/Command select)
+* **RESET** ➡️ `GP21` (Pin 27, Reset)
+
 ### ⌨️ Keypad Layout
 
 The 16 keys on the module are divided into two halves: input keys (first 2 rows) and function keys (last 2 rows).
