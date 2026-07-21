@@ -178,17 +178,16 @@ To play a move (e.g. `e2e4`), type it as a 4-key sequence using the 8 input keys
 ### ⏱️ Level Modes
 LugalChess supports two distinct level modes:
 
-1. **Time-Based Levels (`tInE LEu`, Default):**
-   * **L1**: 1s (`t-1s`)
-   * **L2**: 2s (`t-2s`)
-   * **L3**: 5s (`t-5s`)
-   * **L4**: 10s (`t10s`)
-   * **L5**: 15s (`t15s`)
-   * **L6**: 30s (`t30s`)
-   * **L7**: 60s (`t60s`)
-   * **L8**: Infinite / Manual Stop (`t-In`)
-2. **Ply-Based Levels (`PLy  LEu`):**
-   * **L1–L8**: Depths 1, 2, 3, 5, 7, 9, 11, 13 (`L-01` $\dots$ `L-13`).
+### ⏱️ Level System (Time-Based)
+LugalChess uses a unified **Time-Based Level System** (Levels 1–8) featuring dynamic time estimation ($t_e = b \cdot T_{\text{last}}$) to predict branching factor $b \in [2.5, 5.0]$ and prevent overshooting:
+* **Level 1**: 1s per move (`t-1s` on 7-segment / `Lvl:1s` on TFT)
+* **Level 2**: 2s per move (`t-2s` on 7-segment / `Lvl:2s` on TFT)
+* **Level 3**: 5s per move (`t-5s` on 7-segment / `Lvl:5s` on TFT)
+* **Level 4**: 10s per move (`t10s` on 7-segment / `Lvl:10s` on TFT)
+* **Level 5**: 15s per move (`t15s` on 7-segment / `Lvl:15s` on TFT)
+* **Level 6**: 30s per move (`t30s` on 7-segment / `Lvl:30s` on TFT)
+* **Level 7**: 60s per move (`t60s` on 7-segment / `Lvl:60s` on TFT)
+* **Level 8**: Infinite / Manual Stop (`t-In` on 7-segment / `Lvl:Inf` on TFT)
 
 ### 🛠️ Options Menu List
 Cycle through options using `Back`/`Fwrd` and confirm with `Enter`:
@@ -196,13 +195,12 @@ Cycle through options using `Back`/`Fwrd` and confirm with `Enter`:
 2. `PLAy bL`: Sets user to White (engine stays idle until you move).
 3. `PLAy UH`: Sets user to Black (engine plays first move immediately).
 4. `ScOrE`: Briefly displays current evaluation score (e.g. `ScO +1.50` or mate `ScO +M3`).
-5. `LEuEL`: Enters Level Selection Mode.
-6. `tInE PLy`: Toggles Level Mode between **Time-Based** (`tInE LEu`) and **Ply-Based** (`PLy  LEu`).
-7. `SIdES`: Displays active turn (`SIdE WH` or `SIdE bL`).
-8. `HAlF`: Displays halfmove clock for the 50-move rule (e.g. `H- 04`).
-9. `MOuES`: Displays total plies played (e.g. `n- 12`).
-10. `SAuE`: Saves current game and settings to QSPI flash / file.
-11. `LOAd`: Loads saved game and settings.
+5. `LEuEL`: Enters Level Selection Mode (select Levels 1 to 8).
+6. `SIdES`: Displays active turn (`SIdE WH` or `SIdE bL`).
+7. `HAlF`: Displays halfmove clock for the 50-move rule (e.g. `H- 04`).
+8. `MOuES`: Displays total plies played (e.g. `n- 12`).
+9. `SAuE`: Saves current game and settings to QSPI flash / file.
+10. `LOAd`: Loads saved game and settings.
 
 ---
 
@@ -210,7 +208,7 @@ Cycle through options using `Back`/`Fwrd` and confirm with `Enter`:
 
 * **Top $128 \times 128$ px**: Color graphic chessboard with piece bitmaps and square colors.
 * **Bottom Status Area ($128 \times 32$ px)**:
-  * **Line 1 (Yellow)**: `Lvl:n[s/d]/mm Side Score` (e.g., `Lvl:2s/05 White +0.50` or `Lvl:5d/07 Black -1.20` or `+M3`).
+  * **Line 1 (Yellow)**: `Lvl:time/mm Side Score` (e.g., `Lvl:2s/05 W +0.50`, `Lvl:10s/07 W +1.20`, `Lvl:Inf/05 W +M2`).
   * **Line 2 (Cyan/White/Red)**:
     * *During Calculation*: Live **PV line** sequence (e.g., `F3D4 E7E5 G1F3 B8C6`).
     * *After Move*: Last move played plus status comment (e.g., `f3d4 Check`, `e7e8q Mate`, `Draw`).

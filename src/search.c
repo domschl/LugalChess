@@ -505,14 +505,20 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
             break;
         }
 
-        // Retrieve best move from Transposition Table
         Move temp_move = 0;
-        int temp_score;
-        read_tt(pos->hash_key, d, -INFINITY_VALUE, INFINITY_VALUE, &temp_score, &temp_move);
-        if (temp_move != 0) {
+        int temp_score = 0;
+        if (read_tt(pos->hash_key, d, -INFINITY_VALUE, INFINITY_VALUE, &temp_score, &temp_move) && temp_move != 0) {
             best_move = temp_move;
-            best_score = score;
+        } else {
+            Move probe_move = 0;
+            if (probe_tt_entry(pos->hash_key, NULL, &probe_move) && probe_move != 0) {
+                best_move = probe_move;
+            }
         }
+        best_score = score;
+
+        // Send progress callback with current best move and score for this completed depth
+        search_progress_callback(best_move, best_score, d);
 
         long now_ms = get_time_ms();
         long time_spent = now_ms - start_search_time_ms;
@@ -549,6 +555,11 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
         }
         printf("\n");
         fflush(stdout);
+
+        // If mate is detected (e.g. M1, M2, M3), stop calculating deeper levels!
+        if (best_score >= MATE_VALUE - 100 || best_score <= -MATE_VALUE + 100) {
+            break;
+        }
 
         // Dynamic time-based cutoff:
         // Estimate time required for the next depth iteration (d + 1) based on effective branching factor b

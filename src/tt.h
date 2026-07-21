@@ -27,6 +27,7 @@ void increment_tt_age(void);
 
 // Read from TT
 bool read_tt(uint64_t hash_key, int depth, int alpha, int beta, int *score, Move *best_move);
+bool probe_tt_entry(uint64_t hash_key, int *score, Move *best_move);
 
 // Write to TT
 void write_tt(uint64_t hash_key, Move best_move, int score, int depth, uint8_t flags);

@@ -88,6 +88,23 @@ bool read_tt(uint64_t hash_key, int depth, int alpha, int beta, int *score, Move
     return false;
 }
 
+bool probe_tt_entry(uint64_t hash_key, int *score, Move *best_move) {
+    if (tt_table == NULL || tt_size_entries == 0) {
+        return false;
+    }
+
+    int idx = (int)(hash_key % (uint64_t)tt_size_entries);
+    TTEntry *entry = &tt_table[idx];
+
+    if (entry->hash_key == hash_key) {
+        if (best_move) *best_move = entry->best_move;
+        if (score) *score = (int)entry->score;
+        return true;
+    }
+
+    return false;
+}
+
 void write_tt(uint64_t hash_key, Move best_move, int score, int depth, uint8_t flags) {
     if (tt_table == NULL || tt_size_entries == 0) {
         return;
