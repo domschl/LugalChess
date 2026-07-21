@@ -560,4 +560,5 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
     }
     printf("\n");
     fflush(stdout);
+    stop_search = false;
 }

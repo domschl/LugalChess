@@ -17,7 +17,11 @@ static int ram_save_level = 0;
 static bool ram_save_valid = false;
 static int max_history_ply = 0;
 
+static bool check_and_display_game_over(Position *pos);
+static void check_and_update_check_status(Position *pos);
+
 #if defined(__arm__) || defined(PICO_BOARD)
+static void format_move_str(Move move, char *move_str);
 static void sync_moves_from_history(const Position *pos);
 #endif
 
@@ -104,9 +108,11 @@ static void update_tm1638_display(void) {
     if (current_pos_ptr) {
         game_side_to_move = current_pos_ptr->side;
         int score = evaluate(current_pos_ptr);
-        const char *last_move = (current_pos_ptr->side == WHITE) ? last_engine_move : last_player_move;
-        if (last_move[0] == ' ' || last_move[0] == '\0') {
-            last_move = (current_pos_ptr->side == WHITE) ? last_player_move : last_engine_move;
+        char last_move_buf[6] = "";
+        const char *last_move = "";
+        if (current_pos_ptr->history_ply > 0) {
+            format_move_str(current_pos_ptr->history[current_pos_ptr->history_ply - 1].move, last_move_buf);
+            last_move = last_move_buf;
         }
         st7735_draw_board(current_pos_ptr);
         st7735_draw_status(current_pos_ptr, search_level, game_side_to_move, search_depth, score, 0, last_move, false, game_status_msg);
@@ -260,6 +266,9 @@ void search_poll_stop_callback(void) {
     int key = tm1638_get_key();
     if (key == 11) {
         stop_search = true;
+        while (tm1638_get_key() == 11) {
+            sleep_ms(10);
+        }
     }
     else if (key == 10) { // Board key
         show_thinking_board = !show_thinking_board;
@@ -384,10 +393,26 @@ static bool execute_player_move(Position *pos, const char *move_str) {
     return false;
 }
 
+static Move get_tt_best_move(uint64_t hash_key) {
+    if (tt_table == NULL || tt_size_entries == 0) return 0;
+    int idx = (int)(hash_key % (uint64_t)tt_size_entries);
+    if (tt_table[idx].hash_key == hash_key) {
+        return tt_table[idx].best_move;
+    }
+    return 0;
+}
+
 // Make engine search and play a move
 static void make_engine_move(Position *pos) {
     printf("Engine is thinking (depth %d)...\n", search_depth);
     fflush(stdout);
+
+    stop_search = false;
+#if defined(__arm__) || defined(PICO_BOARD)
+    current_search_best_move = 0;
+    current_search_score = 0;
+    current_search_depth = 1;
+#endif
 
     // Perform iterative deepening search
     search_position(pos, search_depth, -1);
@@ -401,6 +426,27 @@ static void make_engine_move(Position *pos) {
         if (best_move != 0) {
             score = dummy_score;
             break;
+        }
+    }
+
+#if defined(__arm__) || defined(PICO_BOARD)
+    if (best_move == 0 && current_search_best_move != 0) {
+        best_move = current_search_best_move;
+        score = current_search_score;
+    }
+#endif
+    if (best_move == 0) {
+        best_move = get_tt_best_move(pos->hash_key);
+    }
+    if (best_move == 0) {
+        MoveList list;
+        generate_moves(pos, &list);
+        for (int i = 0; i < list.count; i++) {
+            if (make_move(pos, list.moves[i])) {
+                unmake_move(pos);
+                best_move = list.moves[i];
+                break;
+            }
         }
     }
     
@@ -433,10 +479,18 @@ static void make_engine_move(Position *pos) {
             last_engine_move[4] = '\0';
         }
         update_tm1638_display();
+        if (!check_and_display_game_over(pos)) {
+            check_and_update_check_status(pos);
+        }
 #endif
 
     } else {
         printf("Engine resigned or found no legal moves.\n");
+#if defined(__arm__) || defined(PICO_BOARD)
+        if (!check_and_display_game_over(pos)) {
+            check_and_update_check_status(pos);
+        }
+#endif
     }
 }
 
@@ -478,7 +532,7 @@ static void get_line_custom(char *buffer, int max_len) {
             // Key press debouncing
             sleep_ms(250);
 
-            if (game_status_msg[0] != '\0') {
+            if (game_status_msg[0] != '\0' && key != 11) {
                 strcpy(game_status_msg, "");
                 display_show_moves = true;
                 update_tm1638_display();
@@ -853,7 +907,7 @@ static void check_and_update_check_status(Position *pos) {
         strcpy(game_status_msg, "CHk     ");
         display_show_moves = false;
         last_normal_toggle_ms = time_us_32() / 1000;
-        tm1638_display_string(game_status_msg);
+        update_tm1638_display();
     } else {
         strcpy(game_status_msg, "");
         display_show_moves = true;
@@ -862,6 +916,26 @@ static void check_and_update_check_status(Position *pos) {
 #else
     (void)pos;
 #endif
+}
+
+static bool is_threefold_repetition(const Position *pos) {
+    if (pos->history_ply < 4) return false;
+    
+    int count = 1; // Current position counts as 1st occurrence
+    int start_ply = pos->history_ply - 1;
+    int end_ply = pos->history_ply - pos->halfmove;
+    if (end_ply < 0) end_ply = 0;
+
+    for (int i = start_ply; i >= end_ply; i--) {
+        if (pos->history[i].hash_key == pos->hash_key) {
+            count++;
+            if (count >= 3) {
+                return true;
+            }
+        }
+    }
+    
+    return false;
 }
 
 static bool check_and_display_game_over(Position *pos) {
@@ -908,13 +982,24 @@ static bool check_and_display_game_over(Position *pos) {
         return true;
     }
     
+    if (is_threefold_repetition(pos)) {
+        printf("\nDraw by 3-fold repetition.\n");
+#if defined(__arm__) || defined(PICO_BOARD)
+        strcpy(game_status_msg, "drAU    ");
+        display_show_moves = false;
+        last_normal_toggle_ms = time_us_32() / 1000;
+        update_tm1638_display();
+#endif
+        return true;
+    }
+
     if (pos->halfmove >= 100) {
         printf("\nDraw by 50-move rule.\n");
 #if defined(__arm__) || defined(PICO_BOARD)
         strcpy(game_status_msg, "drAU    ");
         display_show_moves = false;
         last_normal_toggle_ms = time_us_32() / 1000;
-        tm1638_display_string(game_status_msg);
+        update_tm1638_display();
 #endif
         return true;
     }
@@ -1120,6 +1205,9 @@ void console_loop(void) {
         else if (strcmp(line, "go") == 0) {
             make_engine_move(&pos);
             print_board(&pos);
+            if (!check_and_display_game_over(&pos)) {
+                check_and_update_check_status(&pos);
+            }
         } 
         else if (strcmp(line, "undo") == 0) {
             if (pos.history_ply > 0) {
