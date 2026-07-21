@@ -17,6 +17,12 @@ static int ram_save_level = 0;
 static bool ram_save_valid = false;
 static int max_history_ply = 0;
 
+static bool level_mode_time = true; // true = Time-Based, false = Ply-Based
+static int search_level = 2;
+static const int level_depths[8] = { 1, 2, 3, 5, 7, 9, 11, 13 };
+static const int level_times_ms[8] = { 1000, 2000, 5000, 10000, 15000, 30000, 60000, -1 };
+static int search_depth = 2;
+
 static bool check_and_display_game_over(Position *pos);
 static void check_and_update_check_status(Position *pos);
 
@@ -36,9 +42,6 @@ static void sync_moves_from_history(const Position *pos);
 static char last_player_move[6] = "     ";
 static char last_engine_move[6] = "     ";
 static Position *current_pos_ptr = NULL;
-static int search_level = 2;
-static const int level_depths[8] = { 1, 2, 3, 5, 7, 9, 11, 13 };
-static int search_depth = 2;
 static char game_status_msg[9] = "";
 static bool display_show_moves = true;
 static uint32_t last_normal_toggle_ms = 0;
@@ -64,13 +67,14 @@ typedef struct {
     int level;
 } SaveData;
 
-#define OPTION_COUNT 10
+#define OPTION_COUNT 11
 static const char *option_names[OPTION_COUNT] = {
     "nEU gAnE",
     "PLAy bL ",
     "PLAy UH ",
     "ScOrE   ",
     "LEuEL   ",
+    "tInE PLy",
     "SIdES   ",
     "HAlF    ",
     "MOuES   ",
@@ -115,7 +119,7 @@ static void update_tm1638_display(void) {
             last_move = last_move_buf;
         }
         st7735_draw_board(current_pos_ptr);
-        st7735_draw_status(current_pos_ptr, search_level, game_side_to_move, search_depth, score, 0, last_move, false, game_status_msg);
+        st7735_draw_status(current_pos_ptr, search_level, level_mode_time, game_side_to_move, search_depth, score, 0, last_move, false, game_status_msg);
     }
 }
 
@@ -234,7 +238,7 @@ static void update_thinking_display(void) {
 
 #if defined(__arm__) || defined(PICO_BOARD)
     if (current_pos_ptr) {
-        st7735_draw_status(current_pos_ptr, search_level, game_side_to_move, current_search_depth, current_search_score, current_search_best_move, "", true, "");
+        st7735_draw_status(current_pos_ptr, search_level, level_mode_time, game_side_to_move, current_search_depth, current_search_score, current_search_best_move, "", true, "");
     }
 #endif
 }
@@ -301,12 +305,6 @@ void search_poll_stop_callback(void) {
 // Dummy search callbacks for host build
 void search_progress_callback(Move move, int score, int depth) {}
 void search_poll_stop_callback(void) {}
-#endif
-
-
-// Default search depth: lower on firmware to reduce stack usage
-#if !defined(__arm__) && !defined(PICO_BOARD)
-static int search_depth = 5;
 #endif
 
 // Print commands help
@@ -404,7 +402,7 @@ static Move get_tt_best_move(uint64_t hash_key) {
 
 // Make engine search and play a move
 static void make_engine_move(Position *pos) {
-    printf("Engine is thinking (depth %d)...\n", search_depth);
+    printf("Engine is thinking (%s level %d)...\n", level_mode_time ? "time" : "depth", search_level);
     fflush(stdout);
 
     stop_search = false;
@@ -414,8 +412,19 @@ static void make_engine_move(Position *pos) {
     current_search_depth = 1;
 #endif
 
+    int max_depth = 64;
+    int time_limit = -1;
+
+    if (level_mode_time) {
+        time_limit = level_times_ms[search_level - 1];
+        max_depth = 64;
+    } else {
+        time_limit = -1;
+        max_depth = level_depths[search_level - 1];
+    }
+
     // Perform iterative deepening search
-    search_position(pos, search_depth, -1);
+    search_position(pos, max_depth, time_limit);
     
     // Retrieve best move and score from TT (scanning downwards from max depth in case search was boosted or aborted)
     Move best_move = 0;
@@ -682,7 +691,12 @@ static void get_line_custom(char *buffer, int max_len) {
                     search_level = key + 1;
                     search_depth = level_depths[search_level - 1];
                     char buf[9];
-                    snprintf(buf, sizeof(buf), "L-%02d    ", search_level);
+                    if (level_mode_time) {
+                        const char *time_names[8] = { "t-1s    ", "t-2s    ", "t-5s    ", "t10s    ", "t15s    ", "t30s    ", "t60s    ", "t-In    " };
+                        snprintf(buf, sizeof(buf), "%s", time_names[search_level - 1]);
+                    } else {
+                        snprintf(buf, sizeof(buf), "L-%02d    ", search_level);
+                    }
                     tm1638_display_string(buf);
                 }
                 // Stop key (11) -> Cancel
@@ -744,9 +758,21 @@ static void get_line_custom(char *buffer, int max_len) {
                     } else if (current_option_idx == 4) { // Level
                         current_board_mode = MODE_LEVEL_SELECT;
                         char buf[9];
-                        snprintf(buf, sizeof(buf), "L-%02d    ", search_level);
+                        if (level_mode_time) {
+                            const char *time_names[8] = { "t-1s    ", "t-2s    ", "t-5s    ", "t10s    ", "t15s    ", "t30s    ", "t60s    ", "t-In    " };
+                            snprintf(buf, sizeof(buf), "%s", time_names[search_level - 1]);
+                        } else {
+                            snprintf(buf, sizeof(buf), "L-%02d    ", search_level);
+                        }
                         tm1638_display_string(buf);
-                    } else if (current_option_idx == 5) { // Side
+                    } else if (current_option_idx == 5) { // Mode: Time vs Ply
+                        level_mode_time = !level_mode_time;
+                        char buf[9];
+                        snprintf(buf, sizeof(buf), "%s", level_mode_time ? "tInE LEu" : "PLy  LEu");
+                        tm1638_display_string(buf);
+                        sleep_ms(1500);
+                        tm1638_display_string(option_names[current_option_idx]);
+                    } else if (current_option_idx == 6) { // Side
                         if (current_pos_ptr) {
                             char buf[9];
                             snprintf(buf, sizeof(buf), "SIdE %s", current_pos_ptr->side == WHITE ? "WH" : "bL");
@@ -1070,22 +1096,36 @@ void console_loop(void) {
             print_position_info(&pos);
         } 
         else if (strncmp(line, "level", 5) == 0) {
-            int val = atoi(line + 5);
-            if (val >= 1 && val <= 64) {
-                search_depth = val;
-                printf("Search depth set to %d.\n", search_depth);
-#if defined(__arm__) || defined(PICO_BOARD)
-                // Try to find corresponding level 1-8
-                search_level = 0;
-                for (int i = 0; i < 8; i++) {
-                    if (level_depths[i] == val) {
-                        search_level = i + 1;
-                        break;
-                    }
+            char *ptr = line + 5;
+            while (*ptr == ' ') ptr++;
+            int val = atoi(ptr);
+            if (val >= 1 && val <= 8) {
+                search_level = val;
+                if (strstr(ptr, "d") != NULL || strstr(ptr, "p") != NULL) {
+                    level_mode_time = false;
+                } else if (strstr(ptr, "s") != NULL || strstr(ptr, "t") != NULL) {
+                    level_mode_time = true;
                 }
+                search_depth = level_depths[search_level - 1];
+                if (level_mode_time) {
+                    int t_ms = level_times_ms[search_level - 1];
+                    if (t_ms != -1) {
+                        printf("Search level set to %d (Time: %d ms per move).\n", search_level, t_ms);
+                    } else {
+                        printf("Search level set to %d (Time: Infinite / manual stop).\n", search_level);
+                    }
+                } else {
+                    printf("Search level set to %d (Depth: %d plies).\n", search_level, search_depth);
+                }
+#if defined(__arm__) || defined(PICO_BOARD)
+                update_tm1638_display();
 #endif
+            } else if (val >= 9 && val <= 64) {
+                level_mode_time = false;
+                search_depth = val;
+                printf("Custom depth search set to %d plies.\n", search_depth);
             } else {
-                printf("Invalid level. Please specify depth between 1 and 64.\n");
+                printf("Invalid level. Specify level 1-8 (e.g. 'level 3', 'level 3s', 'level 5d').\n");
             }
         } 
         else if (strncmp(line, "fen", 3) == 0) {

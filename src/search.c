@@ -491,8 +491,12 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
     Move best_move = 0;
     int best_score = -INFINITY_VALUE;
 
+    long prev_iter_time_ms = 0;
+
     // Iterative Deepening
     for (int d = 1; d <= depth; d++) {
+        long iter_start_time_ms = get_time_ms();
+
         extern void search_progress_callback(Move move, int score, int depth);
         search_progress_callback(0, 0, d);
         int score = pv_search(pos, d, 0, -INFINITY_VALUE, INFINITY_VALUE, true);
@@ -510,7 +514,10 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
             best_score = score;
         }
 
-        long time_spent = get_time_ms() - start_search_time_ms;
+        long now_ms = get_time_ms();
+        long time_spent = now_ms - start_search_time_ms;
+        long last_iter_time_ms = now_ms - iter_start_time_ms;
+
         double nps = time_spent > 0 ? (double)nodes_searched / ((double)time_spent / 1000.0) : 0.0;
 
         // Print UCI info block
@@ -543,9 +550,23 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
         printf("\n");
         fflush(stdout);
 
-        // Terminate search early if we have run out of 50% of the allocated search time window
-        if (max_search_time_ms != -1 && time_spent > max_search_time_ms / 2) {
-            break;
+        // Dynamic time-based cutoff:
+        // Estimate time required for the next depth iteration (d + 1) based on effective branching factor b
+        if (max_search_time_ms != -1) {
+            double b = 3.5; // default branching factor estimate
+            if (d >= 2 && prev_iter_time_ms > 0) {
+                b = (double)last_iter_time_ms / (double)prev_iter_time_ms;
+                if (b < 2.5) b = 2.5;
+                if (b > 5.0) b = 5.0;
+            }
+            prev_iter_time_ms = last_iter_time_ms;
+
+            double est_next_iter_ms = b * (last_iter_time_ms > 0 ? last_iter_time_ms : 5);
+
+            // If time spent plus half of estimated next iteration time exceeds allotted time, stop before launching d+1
+            if (time_spent + (long)(est_next_iter_ms / 2.0) >= max_search_time_ms) {
+                break;
+            }
         }
     }
 

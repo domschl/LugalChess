@@ -510,12 +510,12 @@ static void get_pv_string(const Position *pos, Move best_move, int depth, char *
 }
 
 // Draw console/game status metadata on the remaining 128x32 pixel block (Y: 128..159)
-void st7735_draw_status(const Position *pos, int level, int side, int current_depth, int score, Move current_best_move, const char *last_move, bool is_thinking, const char *status_msg) {
+void st7735_draw_status(const Position *pos, int level, bool is_time_level, int side, int current_depth, int score, Move current_best_move, const char *last_move, bool is_thinking, const char *status_msg) {
     // 1. Clear status area to solid black
     st7735_draw_rect(0, 128, 128, 32, ST7735_BLACK);
     st7735_draw_rect(0, 127, 128, 1, ST7735_GRAY);
 
-    // 2. Line 1 (y: 131): "Lvl:n/mm Side score"
+    // 2. Line 1 (y: 131): "Lvl:n[s/d]/mm Side score"
     char score_str[12];
     if (score > MATE_VALUE - 100) {
         int moves = (INFINITY_VALUE - score + 1) / 2;
@@ -528,8 +528,19 @@ void st7735_draw_status(const Position *pos, int level, int side, int current_de
         snprintf(score_str, sizeof(score_str), "%s%.2f", (w_score >= 0) ? "+" : "", w_score / 100.0);
     }
 
+    char lvl_str[8];
+    if (is_time_level) {
+        if (level == 8) {
+            strcpy(lvl_str, "Inf");
+        } else {
+            snprintf(lvl_str, sizeof(lvl_str), "%ds", level);
+        }
+    } else {
+        snprintf(lvl_str, sizeof(lvl_str), "%dd", level);
+    }
+
     char line1_buf[24];
-    snprintf(line1_buf, sizeof(line1_buf), "Lvl:%d/%02d %s %s", level, current_depth, (side == WHITE) ? "White" : "Black", score_str);
+    snprintf(line1_buf, sizeof(line1_buf), "Lvl:%s/%02d %s %s", lvl_str, current_depth, (side == WHITE) ? "W" : "B", score_str);
     st7735_draw_string(2, 131, line1_buf, ST7735_YELLOW, 1);
 
     // 3. Line 2 (y: 145): PV line or last move + comment

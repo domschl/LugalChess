@@ -1,6 +1,6 @@
 # LugalChess ♔
 
-**LugalChess** is a lightweight, high-performance console chess engine written in pure C (C11). It is designed from the ground up to support both desktop computing and extremely resource-constrained embedded systems, specifically the **Raspberry Pi Pico 2 (RP2350)** with sub-520KB SRAM limits.
+**LugalChess** is a lightweight, high-performance console and embedded chess engine written in pure C (C11). It is designed from the ground up to support both desktop computing and resource-constrained embedded microcontrollers, specifically the **Raspberry Pi Pico 2 (RP2350)** with sub-520KB SRAM limits.
 
 ---
 
@@ -16,16 +16,24 @@
   * **Transposition Table (TT)**: Memory-mapped transposition caching with aging. Automatically scales down to **32KB** on microcontrollers to fit in RAM.
   * **Move Ordering**: Hash move first, captures sorted by MVV-LVA (Most Valuable Victim - Least Valuable Aggressor), Quiet promotions, Killer Moves, and History Heuristics.
 * **PeSTO Tapered Evaluation**: High-quality positional evaluation interpolating Middlegame and Endgame values based on game phase, using fast, integer-only mathematics.
-* **Dual Interface Support**:
-  * **UCI Protocol**: Standard Chess interface to connect to GUIs (like Arena, Cutechess, Lichess).
-  * **Interactive Console**: Human-friendly terminal CLI to play, undo, evaluate, or list moves directly.
+* **Dual Level System (Time-Based & Ply-Based)**:
+  * **Time-Based Mode (Default)**: 1s, 2s, 5s, 10s, 15s, 30s, 60s per move, or Infinite (`t-In`). Features a **dynamic time estimation algorithm** ($t_e = b \cdot T_{\text{last}}$) predicting branching factor $b \in [2.5, 5.0]$ to stop search cleanly before launching an overshooting depth iteration.
+  * **Ply-Based Mode**: Fixed search depths (Depths 1, 2, 3, 5, 7, 9, 11, 13).
+* **Rich Graphic & Hardware Interfaces**:
+  * **1.8" ST7735 SPI TFT LCD**: Renders a $128 \times 128$ px color chessboard with piece bitmaps and a 2-line real-time status area (showing level mode, search depth, White-perspective evaluation score, live PV lines, and move comments).
+  * **QYF-TM1638 8-Digit 7-Segment & 4x4 Keypad**: Dual 4-digit display for move inputs, real-time thinking feedback, and level/options menus.
+  * **Single Half-Move Undo & Redo**: `Back` and `Fwrd` keys step backward and forward through history by single half-moves ($1$ ply).
+  * **Rule Engine**: Full detection of Check, Checkmate, Stalemate, 50-move rule, and **Threefold Repetition Draw**.
+* **Dual Interface Protocols**:
+  * **UCI Protocol**: Standard Chess interface to connect to GUIs (Arena, Cutechess, Lichess).
+  * **Interactive Console**: Human-friendly terminal CLI and embedded control interface.
 
 ---
 
 ## 📁 Repository Structure
 
-* `src/`: Core engine code (board representations, move generation, search, evaluation).
-* `firmware/`: Embedded firmware code, boot routines, and configuration files for RP2350.
+* `src/`: Core engine code (board representations, move generation, search, evaluation, CLI console).
+* `firmware/`: Embedded firmware code, boot routines, TM1638 keypad/7-segment driver, and ST7735 TFT LCD driver for RP2350.
 * `CMakeLists.txt`: Build configuration for host desktop execution.
 
 ---
@@ -53,12 +61,13 @@ Run with the `-c` or `--console` flag:
 * `help` - Show instructions.
 * `new` - Reset board to standard start position.
 * `board` (or `d`) - Print current board and status info.
-* `level <depth>` - Configure engine search depth (e.g., `level 6`).
+* `level <n>` - Configure search level (e.g. `level 3s` for 5sec time level, `level 5d` for depth 7 ply level).
 * `eval` - Prints static evaluation of current position (PeSTO centipawns).
 * `moves` - Lists all legal moves available.
-* `go` - Forces the computer to play.
-* `undo` - Takes back the last turn (both your move and the engine's response).
-* `<move>` (e.g., `e2e4`, `g1f3`) - Type a standard coordinate move to play it.
+* `go` - Forces the computer to think and play.
+* `undo` - Takes back 1 half-move (1 ply).
+* `redo` - Re-applies 1 half-move (1 ply) from history.
+* `<move>` (e.g., `e2e4`, `g1f3`, `g7g8q`) - Type a standard coordinate move to play it.
 
 #### B. UCI Mode (Play via Chess GUIs)
 Run without any flags to enter UCI standard mode:
@@ -87,8 +96,6 @@ Install the ARM GCC cross-compiler toolchain:
 
 ### Build Instructions
 
-The CMake configuration automatically downloads the correct Pico SDK version if `PICO_SDK_PATH` is not defined:
-
 ```bash
 # Create build directory for the firmware
 mkdir build_firmware && cd build_firmware
@@ -106,21 +113,16 @@ This compiles and links `lugalchess_firmware.uf2`.
 
 1. Plug in your RP2350 board while holding the **BOOTSEL** button.
 2. Drag and drop `lugalchess_firmware.uf2` onto the mounted volume.
-3. Open a terminal emulator program to connect to the USB serial device:
+3. Connect a USB cable or terminal emulator program:
    ```bash
    picocom -b 115200 /dev/ttyACM0
    ```
-   *(The boot screen and chessboard will display immediately upon connection, and you can play directly by typing moves!)*
 
 ---
 
-## 📺 3. QYF-TM1638 Display & Keypad Interface
+## 📺 3. Hardware Pinout & Wiring
 
-LugalChess includes a native driver for the **QYF-TM1638** module, which combines 8 seven-segment displays and a 4x4 matrix keyboard (16 keys total). This allows for a completely standalone chess computer experience.
-
-### 🔌 Hardware Pinout (RP2350 -> TM1638)
-
-Connect the TM1638 module to your Pico 2 using the following GPIO mapping (defined in `firmware/tm1638.h`):
+### 🔌 QYF-TM1638 (7-Segment Display & 4x4 Keypad)
 
 * **VCC** ➡️ `5V` (or `3.3V` VBUS pin)
 * **GND** ➡️ `GND`
@@ -128,9 +130,7 @@ Connect the TM1638 module to your Pico 2 using the following GPIO mapping (defin
 * **CLK** ➡️ `GP7` (Pin 10)
 * **DIO** ➡️ `GP8` (Pin 11)
 
-### 📺 Hardware Pinout (RP2350 -> 1.8" ST7735 TFT LCD)
-
-Connect the ST7735-based 1.8" SPI TFT screen using the following GPIO mapping (defined in `firmware/st7735.h`):
+### 📺 1.8" ST7735 SPI TFT LCD Screen
 
 * **VCC & LED** ➡️ `3.3V` (logic power & backlight)
 * **GND** ➡️ `GND`
@@ -140,9 +140,9 @@ Connect the ST7735-based 1.8" SPI TFT screen using the following GPIO mapping (d
 * **D/C (A0)** ➡️ `GP20` (Pin 26, Data/Command select)
 * **RESET** ➡️ `GP21` (Pin 27, Reset)
 
-### ⌨️ Keypad Layout
+---
 
-The 16 keys on the module are divided into two halves: input keys (first 2 rows) and function keys (last 2 rows).
+## ⌨️ 4. Keypad Layout & Sub-Modes
 
 ```
 [ A/1 ]  [ B/2 ]  [ C/3 ]  [ D/4 ]   <-- Input Keys (0..3)
@@ -152,62 +152,65 @@ The 16 keys on the module are divided into two halves: input keys (first 2 rows)
 ```
 
 ### 🎮 Move Entry (`MODE_NORMAL`)
-To play a move (e.g. `e2e4`), type it as a 4-key sequence using the 8 input keys. The system dynamically expects files or ranks based on the sequence step:
-1. **First Key**: Expects File. Pressing `E/5` (key 4) inputs `'e'`.
-2. **Second Key**: Expects Rank. Pressing `B/2` (key 1) inputs `'2'`.
-3. **Third Key**: Expects File. Pressing `E/5` (key 4) inputs `'e'`.
-4. **Fourth Key**: Expects Rank. Pressing `D/4` (key 3) inputs `'4'`.
+To play a move (e.g. `e2e4`), type it as a 4-key sequence using the 8 input keys:
+1. **Key 1**: File (e.g. `E/5` $\to$ `'e'`).
+2. **Key 2**: Rank (e.g. `B/2` $\to$ `'2'`).
+3. **Key 3**: File (e.g. `E/5` $\to$ `'e'`).
+4. **Key 4**: Rank (e.g. `D/4` $\to$ `'4'`).
 
-The display shows your entry progress on the left 4 digits (e.g. `E2__` -> `E2E4`). The right 4 digits show the engine's last move (e.g. `E2E4B8C6`).
+*Pawn promotions display `1n2b3r4q` and wait for key selection `1`–`4` (defaulting to Queen).*
 
 ### ⚙️ Function Keys
 
-* **Back (Key 8)**: Takes back the last turn (pops both your move and the engine's reply from history). In Board View, scrolls rank index UP. In Options Menu, scrolls to PREVIOUS option.
-* **Fwrd (Key 9)**: In Board View, scrolls rank index DOWN. In Options Menu, scrolls to NEXT option.
-* **Board (Key 10)**: Enters **Board View Mode**.
-* **Stop (Key 11)**: Cancels current typing progress, exits sub-menus (Board View, Level Select, Options), or aborts an active engine search (playing the best move found so far immediately).
-* **Lvl (Key 12)**: Enters **Level Selection Mode**. Choose levels 1 to 8 by pressing input keys `A/1` through `H/8`.
-* **Anal (Key 13)**: Forces the engine to calculate and play a move immediately (UCI `go` command).
+* **Back (Key 8)**: Takes back **1 half-move** ($1$ ply). In Board View, scrolls rank UP. In Options Menu, scrolls to PREVIOUS option.
+* **Fwrd (Key 9)**: Re-applies **1 half-move** ($1$ ply) from history. In Board View, scrolls rank DOWN. In Options Menu, scrolls to NEXT option.
+* **Board (Key 10)**: Enters **Board View Mode**. During engine thinking, toggles real-time board evaluation observer.
+* **Stop (Key 11)**: Cancels typing input, exits sub-menus, or interrupts an active engine search (playing the best move evaluated up to that exact millisecond).
+* **Lvl (Key 12)**: Enters **Level Selection Mode** (Levels 1 to 8).
+* **Anal (Key 13)**: Forces the engine to calculate and play a move immediately.
 * **Opt (Key 14)**: Enters the **Options Menu**.
 * **Enter (Key 15)**: Confirms the selected option or level.
 
 ---
 
-## 🔎 4. Interface Sub-Modes
+## 🔎 5. Options Menu & Level Modes
 
-### ♚ Board View Mode
-Displays the pieces on the active rank. 
-- When scrolled (using `Back` and `Fwrd`), the display briefly flashes the rank (e.g., `rAnK  1`) for 350ms, then shows all 8 squares of that rank.
-- **Piece Representation**:
-  - Empty squares are displayed as underscores (`_`).
-  - Pieces are displayed as single letters: Pawn=`P`, Knight=`n`, Bishop=`b`, Rook=`r`, Queen=`q`, King=`H` (which represents K).
-  - **White pieces are indicated with a trailing decimal point (`.`)**, whereas **Black pieces are shown without a decimal point**.
+### ⏱️ Level Modes
+LugalChess supports two distinct level modes:
 
-### 📶 Level Selection Mode
-Select levels 1-8. Each level maps to a search depth configured for optimal timing:
-- **Level 1** ➡️ Depth 1
-- **Level 2** ➡️ Depth 2
-- **Level 3** ➡️ Depth 3
-- **Level 4** ➡️ Depth 5
-- **Level 5** ➡️ Depth 7
-- **Level 6** ➡️ Depth 9
-- **Level 7** ➡️ Depth 11
-- **Level 8** ➡️ Depth 13
+1. **Time-Based Levels (`tInE LEu`, Default):**
+   * **L1**: 1s (`t-1s`)
+   * **L2**: 2s (`t-2s`)
+   * **L3**: 5s (`t-5s`)
+   * **L4**: 10s (`t10s`)
+   * **L5**: 15s (`t15s`)
+   * **L6**: 30s (`t30s`)
+   * **L7**: 60s (`t60s`)
+   * **L8**: Infinite / Manual Stop (`t-In`)
+2. **Ply-Based Levels (`PLy  LEu`):**
+   * **L1–L8**: Depths 1, 2, 3, 5, 7, 9, 11, 13 (`L-01` $\dots$ `L-13`).
 
-### 🛠️ Options Menu Mode
+### 🛠️ Options Menu List
 Cycle through options using `Back`/`Fwrd` and confirm with `Enter`:
-1. `nEU gAnE` (New Game): Resets board to startup position.
-2. `PLAy bL` (Play Black): Sets your side to White (engine stays idle until you move).
-3. `PLAy UH` (Play White): Sets your side to Black (engine plays first move immediately).
-4. `ScOrE` (Score): Briefly displays current board evaluation in centipawns (e.g. `ScO +120` or mate `ScO t 03`).
-5. `LEuEL` (Level): Enters Level Selection Mode.
-6. `SIdES` (Sides): Briefly displays the current side to move (`SIdE WH` or `SIdE bL`).
-7. `HAlF` (Halfmove): Displays the halfmove clock for the 50-move rule (e.g., `H- 04`).
-8. `MOuES` (Moves): Displays the total number of plies played in the game (e.g., `n- 12`).
+1. `nEU gAnE`: Resets board to standard starting position.
+2. `PLAy bL`: Sets user to White (engine stays idle until you move).
+3. `PLAy UH`: Sets user to Black (engine plays first move immediately).
+4. `ScOrE`: Briefly displays current evaluation score (e.g. `ScO +1.50` or mate `ScO +M3`).
+5. `LEuEL`: Enters Level Selection Mode.
+6. `tInE PLy`: Toggles Level Mode between **Time-Based** (`tInE LEu`) and **Ply-Based** (`PLy  LEu`).
+7. `SIdES`: Displays active turn (`SIdE WH` or `SIdE bL`).
+8. `HAlF`: Displays halfmove clock for the 50-move rule (e.g. `H- 04`).
+9. `MOuES`: Displays total plies played (e.g. `n- 12`).
+10. `SAuE`: Saves current game and settings to QSPI flash / file.
+11. `LOAd`: Loads saved game and settings.
 
-### 🧠 Live Thinking Feedback
-During calculation, the display updates live with the engine's search progress:
-- **Left 4 Digits**: The current best move found so far (e.g., `E2E4`).
-- **Right 4 Digits**: The evaluation score in centipawns (e.g. `+125`, `-080`) or mate score (e.g., `t 02` for mate in 2 plies).
-- Pressing `Stop` during calculation immediately aborts the search and forces the engine to execute the current best move.
+---
 
+## 📺 6. TFT Display Layout ($128 \times 160$ px)
+
+* **Top $128 \times 128$ px**: Color graphic chessboard with piece bitmaps and square colors.
+* **Bottom Status Area ($128 \times 32$ px)**:
+  * **Line 1 (Yellow)**: `Lvl:n[s/d]/mm Side Score` (e.g., `Lvl:2s/05 White +0.50` or `Lvl:5d/07 Black -1.20` or `+M3`).
+  * **Line 2 (Cyan/White/Red)**:
+    * *During Calculation*: Live **PV line** sequence (e.g., `F3D4 E7E5 G1F3 B8C6`).
+    * *After Move*: Last move played plus status comment (e.g., `f3d4 Check`, `e7e8q Mate`, `Draw`).

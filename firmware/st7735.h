@@ -38,6 +38,6 @@ void st7735_draw_string(int x, int y, const char *str, uint16_t color, int size)
 
 // Chessboard Graphic Rendering
 void st7735_draw_board(const Position *pos);
-void st7735_draw_status(const Position *pos, int level, int side, int current_depth, int score, Move current_best_move, const char *last_move, bool is_thinking, const char *status_msg);
+void st7735_draw_status(const Position *pos, int level, bool is_time_level, int side, int current_depth, int score, Move current_best_move, const char *last_move, bool is_thinking, const char *status_msg);
 
 #endif // ST7735_H
