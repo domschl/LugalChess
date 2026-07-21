@@ -15,6 +15,7 @@
 static Position ram_save_pos;
 static int ram_save_level = 0;
 static bool ram_save_valid = false;
+static int max_history_ply = 0;
 
 #if defined(__arm__) || defined(PICO_BOARD)
 static void sync_moves_from_history(const Position *pos);
@@ -102,33 +103,43 @@ static void update_tm1638_display(void) {
 
     if (current_pos_ptr) {
         game_side_to_move = current_pos_ptr->side;
+        int score = evaluate(current_pos_ptr);
+        const char *last_move = (current_pos_ptr->side == WHITE) ? last_engine_move : last_player_move;
+        if (last_move[0] == ' ' || last_move[0] == '\0') {
+            last_move = (current_pos_ptr->side == WHITE) ? last_player_move : last_engine_move;
+        }
         st7735_draw_board(current_pos_ptr);
-        st7735_draw_status(current_pos_ptr, search_level, game_side_to_move, last_player_move, last_engine_move, game_status_msg);
+        st7735_draw_status(current_pos_ptr, search_level, game_side_to_move, search_depth, score, 0, last_move, false, game_status_msg);
     }
 }
 
 static void format_score_str(int score, char *score_str) {
     if (score > MATE_VALUE - 100) {
         int moves = (INFINITY_VALUE - score + 1) / 2;
-        score_str[0] = 't';
-        score_str[1] = ' ';
-        score_str[2] = '0' + (moves / 10);
-        score_str[3] = '0' + (moves % 10);
-        score_str[4] = '\0';
+        snprintf(score_str, 8, "+t%02d", moves > 99 ? 99 : moves);
     } else if (score < -MATE_VALUE + 100) {
-        int moves = (INFINITY_VALUE + score + 1) / 2;
-        score_str[0] = '-';
-        score_str[1] = 't';
-        score_str[2] = '0' + (moves / 10);
-        score_str[3] = '0' + (moves % 10);
-        score_str[4] = '\0';
+        int moves = (score - INFINITY_VALUE) / 2;
+        snprintf(score_str, 8, "-t%02d", (-moves) > 99 ? 99 : -moves);
     } else {
-        int abs_score = score >= 0 ? score : -score;
-        score_str[0] = score >= 0 ? '+' : '-';
-        score_str[1] = '0' + ((abs_score / 100) % 10);
-        score_str[2] = '0' + ((abs_score / 10) % 10);
-        score_str[3] = '0' + (abs_score % 10);
-        score_str[4] = '\0';
+        char sign = (score >= 0) ? '+' : '-';
+        int abs_score = (score >= 0) ? score : -score;
+        
+        if (abs_score < 1000) {
+            // < 10.00 pawns: format as sign + d.dd (e.g. +1.50, +0.60)
+            int pawns = abs_score / 100;
+            int remainder = abs_score % 100;
+            snprintf(score_str, 8, "%c%d.%02d", sign, pawns, remainder);
+        } else if (abs_score < 10000) {
+            // 10.00 to 99.99 pawns: format as sign + dd.d (e.g. +11.5, +25.4)
+            int pawns = abs_score / 100;
+            int tenths = (abs_score % 100) / 10;
+            snprintf(score_str, 8, "%c%d.%d", sign, pawns, tenths);
+        } else {
+            // >= 100.0 pawns: format as sign + ddd (e.g. +125)
+            int pawns = abs_score / 100;
+            if (pawns > 999) pawns = 999;
+            snprintf(score_str, 8, "%c%d", sign, pawns);
+        }
     }
 }
 
@@ -141,7 +152,7 @@ static void format_move_str(Move move, char *move_str) {
     move_str[3] = '1' + (to / 8);
     if (move_is_promo(move)) {
         int promo = move_promo_piece(move);
-        const char promo_chars[] = "  pnbrqk";
+        const char promo_chars[] = "pnbrqk";
         move_str[4] = promo_chars[promo];
         move_str[5] = '\0';
     } else {
@@ -193,10 +204,11 @@ static void update_thinking_display(void) {
         strcpy(move_str, "tHIn");
     }
     
-    char right_str[5];
+    char right_str[8];
     if (display_show_score) {
         if (current_search_best_move != 0) {
-            format_score_str(current_search_score, right_str);
+            int w_score = (game_side_to_move == WHITE) ? current_search_score : -current_search_score;
+            format_score_str(w_score, right_str);
         } else {
             strcpy(right_str, "K   ");
         }
@@ -204,23 +216,19 @@ static void update_thinking_display(void) {
         snprintf(right_str, sizeof(right_str), "L-%02d", current_search_depth);
     }
     
-    char buf[9];
+    char uppercase_move[5];
     for (int i = 0; i < 4; i++) {
-        buf[i] = toupper((unsigned char)move_str[i]);
-        buf[i + 4] = toupper((unsigned char)right_str[i]);
+        uppercase_move[i] = toupper((unsigned char)move_str[i]);
     }
-    buf[8] = '\0';
-    tm1638_display_string(buf);
+    uppercase_move[4] = '\0';
+    
+    char display_buf[16];
+    snprintf(display_buf, sizeof(display_buf), "%s%s", uppercase_move, right_str);
+    tm1638_display_string(display_buf);
 
 #if defined(__arm__) || defined(PICO_BOARD)
     if (current_pos_ptr) {
-        char think_buf[16];
-        if (current_search_best_move != 0) {
-            snprintf(think_buf, sizeof(think_buf), "THINK:%s L%d", move_str, current_search_depth);
-        } else {
-            snprintf(think_buf, sizeof(think_buf), "THINKING L%d", current_search_depth);
-        }
-        st7735_draw_status(current_pos_ptr, search_level, game_side_to_move, last_player_move, last_engine_move, think_buf);
+        st7735_draw_status(current_pos_ptr, search_level, game_side_to_move, current_search_depth, current_search_score, current_search_best_move, "", true, "");
     }
 #endif
 }
@@ -303,7 +311,8 @@ static void print_help(void) {
     printf("  save            - Save the current position and settings\n");
     printf("  load            - Load the saved position and settings\n");
     printf("  go              - Force the engine to think and play a move\n");
-    printf("  undo            - Take back the last moves (your move + computer's move)\n");
+    printf("  undo            - Take back 1 half-move\n");
+    printf("  redo            - Re-apply 1 half-move\n");
     printf("  eval            - Print the static evaluation score of the current position\n");
     printf("  moves           - List all legal moves in the current position\n");
     printf("  quit            - Exit the program\n");
@@ -356,11 +365,17 @@ static bool execute_player_move(Position *pos, const char *move_str) {
         if (MOVE_FROM(move) == from && MOVE_TO(move) == to) {
             if (promo_piece != NO_PIECE) {
                 if (move_is_promo(move) && move_promo_piece(move) == promo_piece) {
-                    if (make_move(pos, move)) return true;
+                    if (make_move(pos, move)) {
+                        max_history_ply = pos->history_ply;
+                        return true;
+                    }
                 }
             } else {
                 if (!move_is_promo(move)) {
-                    if (make_move(pos, move)) return true;
+                    if (make_move(pos, move)) {
+                        max_history_ply = pos->history_ply;
+                        return true;
+                    }
                 }
             }
         }
@@ -397,12 +412,13 @@ static void make_engine_move(Position *pos) {
                'a' + (to % 8), (to / 8) + 1);
         if (move_is_promo(best_move)) {
             int promo = move_promo_piece(best_move);
-            const char promo_chars[] = "  pnbrqk";
+            const char promo_chars[] = "pnbrqk";
             printf("%c", promo_chars[promo]);
         }
         printf(" (Score: %+d)\n", score);
         
         make_move(pos, best_move);
+        max_history_ply = pos->history_ply;
 #if defined(__arm__) || defined(PICO_BOARD)
         last_engine_move[0] = 'a' + (from % 8);
         last_engine_move[1] = '1' + (from / 8);
@@ -410,7 +426,7 @@ static void make_engine_move(Position *pos) {
         last_engine_move[3] = '1' + (to / 8);
         if (move_is_promo(best_move)) {
             int promo = move_promo_piece(best_move);
-            const char promo_chars[] = "  pnbrqk";
+            const char promo_chars[] = "pnbrqk";
             last_engine_move[4] = promo_chars[promo];
             last_engine_move[5] = '\0';
         } else {
@@ -535,10 +551,17 @@ static void get_line_custom(char *buffer, int max_len) {
                         return;
                     }
                 }
-                // S9: Back key -> Undo
+                // S9: Back key -> Undo 1 half-move
                 else if (key == 8) {
                     strcpy(buffer, "undo");
                     printf("undo\n");
+                    fflush(stdout);
+                    return;
+                }
+                // S10: Fwrd key -> Redo 1 half-move
+                else if (key == 9) {
+                    strcpy(buffer, "redo");
+                    printf("redo\n");
                     fflush(stdout);
                     return;
                 }
@@ -955,6 +978,7 @@ void console_loop(void) {
             sync_moves_from_history(&pos);
             update_tm1638_display();
 #endif
+            max_history_ply = pos.history_ply;
         } 
         else if (strcmp(line, "board") == 0 || strcmp(line, "d") == 0) {
             print_board(&pos);
@@ -988,6 +1012,7 @@ void console_loop(void) {
                 printf("Current FEN: %s\n", fen_buf);
             } else {
                 parse_fen(&pos, fen_str);
+                max_history_ply = pos.history_ply;
                 printf("Position loaded.\n");
                 print_board(&pos);
 #if defined(__arm__) || defined(PICO_BOARD)
@@ -1039,6 +1064,7 @@ void console_loop(void) {
                 if (fgets(fen_buf, sizeof(fen_buf), f)) {
                     fen_buf[strcspn(fen_buf, "\r\n")] = '\0';
                     parse_fen(&pos, fen_buf);
+                    max_history_ply = pos.history_ply;
                     if (fscanf(f, "%d", &level_val) == 1) {
                         search_depth = level_val;
                     }
@@ -1052,6 +1078,7 @@ void console_loop(void) {
             const SaveData *flash_data = (const SaveData *)(0x10000000 + FLASH_SAVE_OFFSET);
             if (flash_data->magic == 0xDECADE02) {
                 parse_fen(&pos, flash_data->fen);
+                max_history_ply = pos.history_ply;
                 search_level = flash_data->level;
                 if (search_level >= 1 && search_level <= 8) {
                     search_depth = level_depths[search_level - 1];
@@ -1071,6 +1098,7 @@ void console_loop(void) {
             if (!loaded) {
                 if (ram_save_valid) {
                     pos = ram_save_pos;
+                    max_history_ply = pos.history_ply;
 #if defined(__arm__) || defined(PICO_BOARD)
                     search_level = ram_save_level;
                     search_depth = level_depths[search_level - 1];
@@ -1094,18 +1122,31 @@ void console_loop(void) {
             print_board(&pos);
         } 
         else if (strcmp(line, "undo") == 0) {
-            // Undo 2 ply (player move + engine move) if possible, or 1 ply if only 1 move has been made.
-            if (pos.history_ply >= 2) {
+            if (pos.history_ply > 0) {
                 unmake_move(&pos);
-                unmake_move(&pos);
-                printf("Took back last turn (2 moves).\n");
-                print_board(&pos);
-            } else if (pos.history_ply == 1) {
-                unmake_move(&pos);
-                printf("Took back 1 move.\n");
+                printf("Took back 1 half-move.\n");
                 print_board(&pos);
             } else {
                 printf("Nothing to undo.\n");
+            }
+#if defined(__arm__) || defined(PICO_BOARD)
+            sync_moves_from_history(&pos);
+            if (!check_and_display_game_over(&pos)) {
+                check_and_update_check_status(&pos);
+            }
+#endif
+        } 
+        else if (strcmp(line, "redo") == 0) {
+            if (pos.history_ply < max_history_ply) {
+                Move move_to_redo = pos.history[pos.history_ply].move;
+                if (make_move(&pos, move_to_redo)) {
+                    printf("Re-applied 1 half-move.\n");
+                    print_board(&pos);
+                } else {
+                    printf("Cannot redo move.\n");
+                }
+            } else {
+                printf("Nothing to redo.\n");
             }
 #if defined(__arm__) || defined(PICO_BOARD)
             sync_moves_from_history(&pos);
@@ -1133,7 +1174,7 @@ void console_loop(void) {
                            'a' + (to % 8), (to / 8) + 1);
                     if (move_is_promo(m)) {
                         int promo = move_promo_piece(m);
-                        const char promo_chars[] = "  pnbrqk";
+                        const char promo_chars[] = "pnbrqk";
                         printf("%c", promo_chars[promo]);
                     }
                     printf("\n");

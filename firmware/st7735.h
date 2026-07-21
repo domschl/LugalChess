@@ -21,6 +21,7 @@
 #define ST7735_BLUE       0x001F
 #define ST7735_GREEN      0x07E0
 #define ST7735_YELLOW     0xFFE0
+#define ST7735_CYAN       0x07FF
 #define ST7735_GRAY       0x8410
 #define ST7735_LIGHT_SQ   0xEF7B // Soft Cream
 #define ST7735_DARK_SQ    0x2444 // Dark Greenish-Blue
@@ -37,6 +38,6 @@ void st7735_draw_string(int x, int y, const char *str, uint16_t color, int size)
 
 // Chessboard Graphic Rendering
 void st7735_draw_board(const Position *pos);
-void st7735_draw_status(const Position *pos, int level, int side, const char *last_player, const char *last_engine, const char *status_msg);
+void st7735_draw_status(const Position *pos, int level, int side, int current_depth, int score, Move current_best_move, const char *last_move, bool is_thinking, const char *status_msg);
 
 #endif // ST7735_H

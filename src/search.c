@@ -61,7 +61,7 @@ static Move get_book_move(Position *pos) {
         m_str[4] = '\0';
         if (move_is_promo(m)) {
             int promo = move_promo_piece(m);
-            const char promo_chars[] = "  pnbrqk";
+            const char promo_chars[] = "pnbrqk";
             m_str[4] = promo_chars[promo];
             m_str[5] = '\0';
         }
@@ -141,7 +141,7 @@ static Move get_book_move(Position *pos) {
             m_str[4] = '\0';
             if (move_is_promo(m)) {
                 int promo = move_promo_piece(m);
-                const char promo_chars[] = "  pnbrqk";
+                const char promo_chars[] = "pnbrqk";
                 m_str[4] = promo_chars[promo];
                 m_str[5] = '\0';
             }
@@ -458,7 +458,7 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
         printf("bestmove %c%d%c%d", 'a' + (from % 8), (from / 8) + 1, 'a' + (to % 8), (to / 8) + 1);
         if (move_is_promo(book_move)) {
             int promo = move_promo_piece(book_move);
-            const char promo_chars[] = "  pnbrqk";
+            const char promo_chars[] = "pnbrqk";
             printf("%c", promo_chars[promo]);
         }
         printf("\n");
@@ -528,7 +528,7 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
             printf("%c%d%c%d", 'a' + (from % 8), (from / 8) + 1, 'a' + (to % 8), (to / 8) + 1);
             if (move_is_promo(pv_move)) {
                 int promo = move_promo_piece(pv_move);
-                const char promo_chars[] = "  pnbrqk";
+                const char promo_chars[] = "pnbrqk";
                 printf("%c", promo_chars[promo]);
             }
             printf(" ");
@@ -555,7 +555,7 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
     printf("bestmove %c%d%c%d", 'a' + (from % 8), (from / 8) + 1, 'a' + (to % 8), (to / 8) + 1);
     if (move_is_promo(best_move)) {
         int promo = move_promo_piece(best_move);
-        const char promo_chars[] = "  pnbrqk";
+        const char promo_chars[] = "pnbrqk";
         printf("%c", promo_chars[promo]);
     }
     printf("\n");
