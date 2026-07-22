@@ -50,18 +50,26 @@ class EngineRegistry(QObject):
         if os.path.exists(local_lugal):
             self.engines.append(EngineInfo("LugalChess (Local Build)", local_lugal))
 
-        # 2. Check system PATH for standard engines (with flags and xboard protocol detection)
-        known_engines = [
-            ("stockfish", [], False),
-            ("lc0", [], False),
-            ("crafty", [], True),  # Crafty uses XBoard protocol
-            ("gnuchess", ["--uci"], False),
-        ]
-        for eng_bin, extra_args, is_xb in known_engines:
+        # 2. Check system PATH for standard engines
+        for eng_bin, extra_args, is_xb in [("crafty", [], True), ("gnuchess", ["--uci"], False)]:
             found_path = shutil.which(eng_bin)
-            if found_path and not any(e.path == found_path for e in self.engines):
+            if found_path:
                 display_name = f"{eng_bin.capitalize()} (System PATH)"
                 self.engines.append(EngineInfo(display_name, found_path, args=extra_args, is_xboard=is_xb))
+
+        # Check for Stockfish and add benchmark handicap presets
+        stockfish_path = shutil.which("stockfish")
+        if stockfish_path:
+            self.engines.append(EngineInfo("Stockfish (1350 ELO - Novice)", stockfish_path, elo_handicap=1350))
+            self.engines.append(EngineInfo("Stockfish (1500 ELO - Intermediate)", stockfish_path, elo_handicap=1500))
+            self.engines.append(EngineInfo("Stockfish (1800 ELO - Club)", stockfish_path, elo_handicap=1800))
+            self.engines.append(EngineInfo("Stockfish (2200 ELO - Master)", stockfish_path, elo_handicap=2200))
+            self.engines.append(EngineInfo("Stockfish (Full Strength)", stockfish_path))
+
+        # Check for Lc0
+        lc0_path = shutil.which("lc0")
+        if lc0_path:
+            self.engines.append(EngineInfo("Lc0 (System PATH)", lc0_path))
 
         # 3. Add RP2350 USB Hardware Engine option
         self.engines.append(EngineInfo("RP2350 USB Hardware Engine", "RP2350_USB_CDC", is_hardware=True))

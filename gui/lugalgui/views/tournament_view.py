@@ -57,16 +57,10 @@ class TournamentView(QWidget):
         setup_tab = QWidget()
         setup_layout = QVBoxLayout(setup_tab)
 
-        engine_group = QGroupBox("Select Participating Engines & Handicap Settings")
+        engine_group = QGroupBox("Select Participating Engines & Preset Rating Tiers")
         eng_group_layout = QVBoxLayout(engine_group)
-        
-        self.engine_setup_table = QTableWidget(self)
-        self.engine_setup_table.setColumnCount(3)
-        self.engine_setup_table.setHorizontalHeaderLabels(["Use", "Engine Executable Target", "Handicap / ELO Throttling"])
-        self.engine_setup_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.engine_setup_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.engine_setup_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        eng_group_layout.addWidget(self.engine_setup_table)
+        self.engine_list_widget = QListWidget(self)
+        eng_group_layout.addWidget(self.engine_list_widget)
 
         config_group = QGroupBox("Tournament Settings")
         config_layout = QHBoxLayout(config_group)
@@ -162,9 +156,9 @@ class TournamentView(QWidget):
         self.tournament_manager.tournament_finished.connect(self.on_tournament_finished)
 
     def refresh_engine_list(self) -> None:
-        """Refresh table of available engines with checkboxes and handicap dropdowns."""
-        self.engine_setup_table.setRowCount(len(self.engine_registry.engines))
-        for row, eng in enumerate(self.engine_registry.engines):
+        """Refresh list of available engine targets and rating presets."""
+        self.engine_list_widget.clear()
+        for eng in self.engine_registry.engines:
             display_str = f"{eng.name} ({eng.path})"
             is_checked = True
 
@@ -178,42 +172,19 @@ class TournamentView(QWidget):
                     display_str = f"{eng.name} (Disconnected USB Serial)"
                     is_checked = False
 
-            # Checkbox column
-            item_check = QTableWidgetItem()
-            item_check.setFlags(item_check.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item_check.setCheckState(Qt.CheckState.Checked if is_checked else Qt.CheckState.Unchecked)
-            item_check.setData(Qt.ItemDataRole.UserRole, eng)
-            self.engine_setup_table.setItem(row, 0, item_check)
-
-            # Name column
-            item_name = QTableWidgetItem(display_str)
-            item_name.setFlags(item_name.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.engine_setup_table.setItem(row, 1, item_name)
-
-            # Handicap dropdown column
-            handicap_combo = QComboBox(self)
-            handicap_combo.addItem("Full Strength (No Handicap)", (None, None))
-            handicap_combo.addItem("Stockfish 1350 ELO (Novice)", (1350, None))
-            handicap_combo.addItem("Stockfish 1500 ELO (Intermediate)", (1500, None))
-            handicap_combo.addItem("Stockfish 1800 ELO (Club Player)", (1800, None))
-            handicap_combo.addItem("Stockfish 2100 ELO (Master)", (2100, None))
-            handicap_combo.addItem("Depth Limit: 4 Plies", (None, 4))
-            handicap_combo.addItem("Depth Limit: 6 Plies", (None, 6))
-            handicap_combo.addItem("Depth Limit: 8 Plies", (None, 8))
-            self.engine_setup_table.setCellWidget(row, 2, handicap_combo)
+            item = QListWidgetItem(display_str)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked if is_checked else Qt.CheckState.Unchecked)
+            item.setData(Qt.ItemDataRole.UserRole, eng)
+            self.engine_list_widget.addItem(item)
 
     def get_selected_engines(self) -> list[EngineInfo]:
-        """Return list of checked EngineInfo instances configured with chosen handicaps."""
+        """Return list of EngineInfo presets checked by user."""
         selected: list[EngineInfo] = []
-        for row in range(self.engine_setup_table.rowCount()):
-            item_check = self.engine_setup_table.item(row, 0)
-            if item_check and item_check.checkState() == Qt.CheckState.Checked:
-                eng: EngineInfo = item_check.data(Qt.ItemDataRole.UserRole)
-                combo: QComboBox | None = self.engine_setup_table.cellWidget(row, 2)
-                if combo:
-                    elo, depth = combo.currentData()
-                    eng.elo_handicap = elo
-                    eng.depth_limit = depth
+        for i in range(self.engine_list_widget.count()):
+            item = self.engine_list_widget.item(i)
+            if item and item.checkState() == Qt.CheckState.Checked:
+                eng: EngineInfo = item.data(Qt.ItemDataRole.UserRole)
                 selected.append(eng)
         return selected
 

@@ -15,6 +15,7 @@ class RP2350Controller(QObject):
     device_disconnected = Signal()
     line_received = Signal(str)         # raw output line
     move_received = Signal(str)         # uci move string (e.g. 'e2e4')
+    best_move_found = Signal(str, str)   # uci move string, ponder move string (for tournament interface compatibility)
     search_progress = Signal(dict)      # depth, score, nps, nodes, time, pv
     new_game_received = Signal()
 
@@ -24,6 +25,21 @@ class RP2350Controller(QObject):
         self.serial_inst: serial.Serial | None = None
         self.listen_thread: threading.Thread | None = None
         self._is_running: bool = False
+
+    def start_engine(self) -> bool:
+        """Tournament engine interface method to start hardware connection."""
+        return self.is_connected
+
+    def stop_engine(self) -> None:
+        """Tournament engine interface method to send stop command."""
+        self.send_command("stop")
+
+    def start_search_time(self, time_limit_ms: int) -> None:
+        """Tournament engine interface method to start search with fixed time limit in ms."""
+        if time_limit_ms <= 0:
+            self.send_command("go infinite")
+        else:
+            self.send_command(f"go movetime {time_limit_ms}")
 
     def start_autodetect(self) -> None:
         """Start background polling thread to detect RP2350 USB serial port."""
@@ -145,9 +161,11 @@ class RP2350Controller(QObject):
 
         if tokens[0] == "bestmove" and len(tokens) >= 2:
             self.move_received.emit(tokens[1])
+            self.best_move_found.emit(tokens[1], "")
         elif len(tokens) >= 3 and tokens[0] == "Engine" and tokens[1] == "plays:":
             # Handle human-readable stream mode fallback
             self.move_received.emit(tokens[2])
+            self.best_move_found.emit(tokens[2], "")
         elif tokens[0] == "ucinewgame" or line == "New game started.":
             self.new_game_received.emit()
         elif tokens[0] == "info":
