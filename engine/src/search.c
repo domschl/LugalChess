@@ -492,16 +492,18 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
     
     MoveList root_list;
     generate_moves(pos, &root_list);
-    Move best_move = 0;
+    Move fallback_move = 0;
     for (int i = 0; i < root_list.count; i++) {
         if (make_move(pos, root_list.moves[i])) {
             unmake_move(pos);
-            best_move = root_list.moves[i];
+            fallback_move = root_list.moves[i];
             break;
         }
     }
 
-    int best_score = -INFINITY_VALUE;
+    Move completed_best_move = fallback_move;
+    int completed_best_score = -INFINITY_VALUE;
+
     long prev_iter_time_ms = 0;
 
     // Iterative Deepening
@@ -512,24 +514,25 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
         search_progress_callback(0, 0, d);
         int score = pv_search(pos, d, 0, -INFINITY_VALUE, INFINITY_VALUE, true);
         
-        Move temp_move = 0;
-        int temp_score = 0;
-        if (read_tt(pos->hash_key, d, -INFINITY_VALUE, INFINITY_VALUE, &temp_score, &temp_move) && temp_move != 0) {
-            best_move = temp_move;
-        } else {
-            Move probe_move = 0;
-            if (probe_tt_entry(pos->hash_key, NULL, &probe_move) && probe_move != 0) {
-                best_move = probe_move;
-            }
-        }
-        best_score = score;
-
+        // If search was interrupted mid-iteration by stop/timer, discard incomplete depth results!
         if (stop_search) {
             break;
         }
 
+        Move temp_move = 0;
+        int temp_score = 0;
+        if (read_tt(pos->hash_key, d, -INFINITY_VALUE, INFINITY_VALUE, &temp_score, &temp_move) && temp_move != 0) {
+            completed_best_move = temp_move;
+        } else {
+            Move probe_move = 0;
+            if (probe_tt_entry(pos->hash_key, NULL, &probe_move) && probe_move != 0) {
+                completed_best_move = probe_move;
+            }
+        }
+        completed_best_score = score;
+
         // Send progress callback with current best move and score for this completed depth
-        search_progress_callback(best_move, best_score, d);
+        search_progress_callback(completed_best_move, completed_best_score, d);
 
         long now_ms = get_time_ms();
         long time_spent = now_ms - start_search_time_ms;
@@ -539,12 +542,12 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
 
         // Print UCI info block
         printf("info depth %d score cp %d nodes %ld nps %.0f time %ld pv ", 
-               d, best_score, nodes_searched, nps, time_spent);
+               d, completed_best_score, nodes_searched, nps, time_spent);
         
         // Print Principal Variation (PV) path
         Position temp_pos = *pos;
         int pv_ply = 0;
-        Move pv_move = best_move;
+        Move pv_move = completed_best_move;
         
         while (pv_move != 0 && pv_ply < d) {
             int from = MOVE_FROM(pv_move);
@@ -568,7 +571,7 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
         fflush(stdout);
 
         // If mate is detected (e.g. M1, M2, M3), stop calculating deeper levels!
-        if (best_score >= MATE_VALUE - 100 || best_score <= -MATE_VALUE + 100) {
+        if (completed_best_score >= MATE_VALUE - 100 || completed_best_score <= -MATE_VALUE + 100) {
             break;
         }
 
@@ -592,12 +595,12 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
         }
     }
 
-    // Output UCI bestmove
-    int from = MOVE_FROM(best_move);
-    int to = MOVE_TO(best_move);
+    // Output UCI bestmove from last fully completed depth
+    int from = MOVE_FROM(completed_best_move);
+    int to = MOVE_TO(completed_best_move);
     printf("bestmove %c%d%c%d", 'a' + (from % 8), (from / 8) + 1, 'a' + (to % 8), (to / 8) + 1);
-    if (move_is_promo(best_move)) {
-        int promo = move_promo_piece(best_move);
+    if (move_is_promo(completed_best_move)) {
+        int promo = move_promo_piece(completed_best_move);
         const char promo_chars[] = "pnbrqk";
         printf("%c", promo_chars[promo]);
     }
