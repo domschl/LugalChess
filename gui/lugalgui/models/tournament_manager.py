@@ -1,15 +1,27 @@
-"""Tournament Manager and Automated Match Execution Engine for LugalChess GUI."""
-
+import queue
 import time
 from typing import Any
 import chess
 import chess.pgn
-from PySide6.QtCore import QObject, QThread, Signal, Slot
+from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 
+from lugalgui.controllers.rp2350_controller import RP2350Controller
 from lugalgui.controllers.uci_controller import UCIController
 from lugalgui.controllers.xboard_adapter import XBoardAdapter
 from lugalgui.models.elo_rating import EloRatingCalculator, EngineEloStats
 from lugalgui.models.engine_registry import EngineInfo, EngineRegistry
+
+
+class MoveReceiver(QObject):
+    """Thread-safe QObject slot receiver for engine bestmove signals."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.queue: queue.Queue[str] = queue.Queue()
+
+    @Slot(str, str)
+    def on_best_move(self, move: str, ponder: str) -> None:
+        self.queue.put(move)
 
 
 class TournamentMatchWorker(QThread):
@@ -123,14 +135,19 @@ class TournamentMatchWorker(QThread):
         self.tournament_finished.emit(self.pgn_games, elo_stats)
 
     def _create_controller(self, info: EngineInfo) -> Any:
-        """Instantiate UCIController or XBoardAdapter based on engine protocol."""
-        if info.is_xboard:
+        """Instantiate UCIController, XBoardAdapter, or RP2350Controller based on engine info."""
+        if info.is_hardware:
+            ctrl = RP2350Controller()
+            if not ctrl.serial_inst:
+                ctrl.connect_serial()
+            return ctrl
+        elif info.is_xboard:
             return XBoardAdapter(info.path, args=info.args)
         else:
-            ctrl = UCIController()
-            ctrl.engine_path = info.path
-            ctrl.engine_args = info.args
-            return ctrl
+            uci_ctrl = UCIController()
+            uci_ctrl.engine_path = info.path
+            uci_ctrl.engine_args = info.args
+            return uci_ctrl
 
     def _stop_controllers(self, c1: Any, c2: Any) -> None:
         """Cleanly stop both engine processes."""
@@ -144,26 +161,23 @@ class TournamentMatchWorker(QThread):
             pass
 
     def _get_engine_move(self, controller: Any, timeout_ms: int) -> str | None:
-        """Request move from engine and wait synchronously on worker thread."""
-        chosen_move: list[str | None] = [None]
-
-        def on_best_move(move: str, ponder: str) -> None:
-            chosen_move[0] = move
-
-        controller.best_move_found.connect(on_best_move)
+        """Request move from engine and wait on thread-safe Queue."""
+        receiver = MoveReceiver()
+        controller.best_move_found.connect(receiver.on_best_move, Qt.ConnectionType.DirectConnection)
         controller.start_search_time(timeout_ms)
 
-        start_t = time.time()
-        timeout_sec = (timeout_ms / 1000.0) + 2.0  # 2s safety buffer
-        while chosen_move[0] is None and (time.time() - start_t) < timeout_sec:
-            time.sleep(0.02)
+        timeout_sec = (timeout_ms / 1000.0) + 3.0
+        try:
+            chosen_move = receiver.queue.get(timeout=timeout_sec)
+        except queue.Empty:
+            chosen_move = None
 
         try:
-            controller.best_move_found.disconnect(on_best_move)
+            controller.best_move_found.disconnect(receiver.on_best_move)
         except Exception:
             pass
 
-        return chosen_move[0]
+        return chosen_move
 
 
 class TournamentManager(QObject):

@@ -159,9 +159,20 @@ class TournamentView(QWidget):
         """Refresh list of available engines with checkboxes."""
         self.engine_list_widget.clear()
         for eng in self.engine_registry.engines:
-            item = QListWidgetItem(f"{eng.name} ({eng.path})")
+            display_str = f"{eng.name} ({eng.path})"
+            is_checked = True
+
+            if eng.is_hardware:
+                # Check if hardware is connected
+                from lugalgui.controllers.rp2350_controller import RP2350Controller
+                test_ctrl = RP2350Controller()
+                if not test_ctrl.serial_inst:
+                    display_str = f"{eng.name} (Disconnected USB Serial)"
+                    is_checked = False
+
+            item = QListWidgetItem(display_str)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Checked)
+            item.setCheckState(Qt.CheckState.Checked if is_checked else Qt.CheckState.Unchecked)
             item.setData(Qt.ItemDataRole.UserRole, eng)
             self.engine_list_widget.addItem(item)
 
@@ -229,6 +240,7 @@ class TournamentView(QWidget):
                 san_str = self.current_board.san(m)
                 self.current_board.push(m)
                 self.mini_board_widget.set_board(self.current_board, last_move=m)
+                self.mini_board_widget.update()
 
                 txt = self.live_pgn_edit.toPlainText()
                 ply = len(self.current_board.move_stack)
@@ -238,6 +250,9 @@ class TournamentView(QWidget):
                 else:
                     txt += f"{san_str} "
                 self.live_pgn_edit.setPlainText(txt)
+                scrollbar = self.live_pgn_edit.verticalScrollBar()
+                if scrollbar:
+                    scrollbar.setValue(scrollbar.maximum())
         except ValueError:
             pass
 
