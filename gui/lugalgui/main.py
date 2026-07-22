@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDockWidget,
     QFileDialog,
+    QHBoxLayout,
     QInputDialog,
     QLabel,
     QMainWindow,
@@ -25,8 +26,12 @@ from PySide6.QtWidgets import (
 
 from lugalgui.controllers.rp2350_controller import RP2350Controller
 from lugalgui.controllers.uci_controller import UCIController
+from lugalgui.models.engine_registry import EngineRegistry
 from lugalgui.models.game_tree import GameTree
+from lugalgui.views.aux_board_widget import AuxBoardWidget
 from lugalgui.views.board_widget import ChessBoardWidget
+from lugalgui.views.eval_bar_widget import EvalBarWidget
+from lugalgui.views.eval_graph_widget import EvalGraphWidget
 from lugalgui.views.notation_widget import NotationWidget
 
 
@@ -35,11 +40,12 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("LugalChess GUI 1.0")
-        self.resize(1100, 750)
+        self.setWindowTitle("LugalChess GUI 1.0 - Multi-Engine Analysis Workspace")
+        self.resize(1180, 800)
 
-        # Core Models and Controllers
+        # Core Models, Engine Registry, and Controllers
         self.game_tree: GameTree = GameTree()
+        self.engine_registry: EngineRegistry = EngineRegistry(self)
         self.uci_controller: UCIController = UCIController()
         self.rp2350_controller: RP2350Controller = RP2350Controller()
         
@@ -48,7 +54,10 @@ class MainWindow(QMainWindow):
         self.custom_time_ms: int | None = None
         self.custom_depth: int | None = None
 
-        # Locate default LugalChess engine executable if present in build directory
+        self.eval_history: list[tuple[int, float]] = []
+        self.aux_boards: list[QDockWidget] = []
+
+        # Default local engine executable
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
         default_engine = os.path.join(project_root, "build", "engine", "lugalchess")
         if os.path.exists(default_engine):
@@ -67,9 +76,17 @@ class MainWindow(QMainWindow):
 
     def _init_ui(self) -> None:
         """Create and layout application UI components."""
-        # 1. Main Central Chess Board Widget
+        # 1. Main Central Area: Vertical Eval Bar + Graphical Chess Board
+        central_container = QWidget(self)
+        central_layout = QHBoxLayout(central_container)
+        central_layout.setContentsMargins(6, 6, 6, 6)
+
+        self.eval_bar_widget = EvalBarWidget(self)
         self.board_widget = ChessBoardWidget(self)
-        self.setCentralWidget(self.board_widget)
+
+        central_layout.addWidget(self.eval_bar_widget)
+        central_layout.addWidget(self.board_widget, stretch=1)
+        self.setCentralWidget(central_container)
 
         # 2. Dock Panels: Move History & Engine Evaluation
         self.notation_widget = NotationWidget(self)
@@ -91,24 +108,39 @@ class MainWindow(QMainWindow):
         self.engine_log_edit = QPlainTextEdit(self)
         self.engine_log_edit.setReadOnly(True)
 
-        # Engine Source Selector Widget
+        # Engine Target Selector (Populated from EngineRegistry)
         self.engine_target_combo = QComboBox(self)
-        self.engine_target_combo.addItem("Engine Target: Local Engine (Subprocess)")
-        self.engine_target_combo.addItem("Engine Target: RP2350 USB Hardware Engine")
-        self.engine_target_combo.setToolTip("Select whether commands and moves are sent to local subprocess or RP2350 serial board")
+        self._populate_engine_target_combo()
+
+        self.multipv_combo = QComboBox(self)
+        self.multipv_combo.addItem("Multi-PV: 1 Line")
+        self.multipv_combo.addItem("Multi-PV: 2 Lines")
+        self.multipv_combo.addItem("Multi-PV: 3 Lines")
+        self.multipv_combo.addItem("Multi-PV: 5 Lines")
+        self.multipv_combo.setToolTip("Configure number of variation lines searched by engine")
+
+        combo_layout = QHBoxLayout()
+        combo_layout.addWidget(self.engine_target_combo, stretch=2)
+        combo_layout.addWidget(self.multipv_combo, stretch=1)
 
         eval_container = QWidget(self)
         eval_layout = QVBoxLayout(eval_container)
         eval_layout.setContentsMargins(4, 4, 4, 4)
-        eval_layout.addWidget(self.engine_target_combo)
+        eval_layout.addLayout(combo_layout)
         eval_layout.addWidget(self.eval_label)
         eval_layout.addWidget(self.pv_label)
         eval_layout.addWidget(self.engine_log_edit)
 
         self.dock_eval = QDockWidget("Engine Analysis & Console", self)
         self.dock_eval.setWidget(eval_container)
-        self.dock_eval.setMinimumWidth(320)
+        self.dock_eval.setMinimumWidth(340)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_eval)
+
+        # 4. Advantage Timeline Chart Dock Panel
+        self.eval_graph_widget = EvalGraphWidget(self)
+        self.dock_graph = QDockWidget("Evaluation History & Advantage Timeline", self)
+        self.dock_graph.setWidget(self.eval_graph_widget)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_graph)
 
         # 4. Status Bar & Indicators
         self.status_bar = QStatusBar(self)
@@ -189,6 +221,17 @@ class MainWindow(QMainWindow):
         act_custom_level.triggered.connect(self.on_custom_level_dialog)
         level_menu.addAction(act_custom_level)
 
+        # View Menu
+        view_menu = menubar.addMenu("&View")
+        act_add_aux = QAction("&Add Auxiliary Analysis Board", self)
+        act_add_aux.triggered.connect(self.on_add_aux_board)
+        view_menu.addAction(act_add_aux)
+        view_menu.addSeparator()
+
+        view_menu.addAction(self.dock_notation.toggleViewAction())
+        view_menu.addAction(self.dock_eval.toggleViewAction())
+        view_menu.addAction(self.dock_graph.toggleViewAction())
+
         # Main Toolbar
         toolbar = QToolBar("Main Toolbar", self)
         self.addToolBar(toolbar)
@@ -204,6 +247,14 @@ class MainWindow(QMainWindow):
 
         # Move notation history click signal
         self.notation_widget.move_selected.connect(self.on_notation_move_clicked)
+
+        # Engine Target Dropdown & Registry Signals
+        self.engine_target_combo.currentIndexChanged.connect(self.on_engine_target_changed)
+        self.engine_registry.registry_updated.connect(self._populate_engine_target_combo)
+
+        # Multi-PV Combo & Timeline Graph Click Signals
+        self.multipv_combo.currentIndexChanged.connect(self.on_multipv_changed)
+        self.eval_graph_widget.move_clicked.connect(self.on_notation_move_clicked)
 
         # UCI Controller Signals
         self.uci_controller.engine_started.connect(self.on_engine_started)
@@ -223,23 +274,26 @@ class MainWindow(QMainWindow):
     def on_new_game(self) -> None:
         """Reset game to starting position."""
         self.game_tree.reset_to_start()
-        self.board_widget.set_board(self.game_tree.board)
-        self.notation_widget.update_history(self.game_tree.get_san_history())
+        self.eval_history = []
+        self.eval_graph_widget.set_eval_history(self.eval_history)
+        self.eval_bar_widget.set_eval(0)
+        self._update_board_and_notation()
         self.status_game_label.setText("New game started.")
         self.eval_label.setText("Score: +0.00 | Depth: 0")
         self.pv_label.setText("PV: -")
         
-        # Notify RP2350 and local engine
-        self.rp2350_controller.send_command("ucinewgame")
-        self.rp2350_controller.send_command("position startpos")
-        self.uci_controller.send_command("ucinewgame")
+        # Notify active engine target
+        if self._is_rp2350_selected():
+            self.rp2350_controller.send_command("ucinewgame")
+            self.rp2350_controller.send_command("position startpos")
+        else:
+            self.uci_controller.send_command("ucinewgame")
 
     @Slot()
     def on_remote_new_game(self) -> None:
         """Called when RP2350 hardware triggers new game."""
         self.game_tree.reset_to_start()
-        self.board_widget.set_board(self.game_tree.board)
-        self.notation_widget.update_history(self.game_tree.get_san_history())
+        self._update_board_and_notation()
         self.status_game_label.setText("New game started on RP2350 hardware.")
         self.eval_label.setText("Score: +0.00 | Depth: 0")
         self.pv_label.setText("PV: -")
@@ -250,11 +304,14 @@ class MainWindow(QMainWindow):
         fen, ok = QInputDialog.getText(self, "Load FEN Position", "Enter valid FEN string:")
         if ok and fen:
             if self.game_tree.load_fen(fen.strip()):
-                self.board_widget.set_board(self.game_tree.board)
-                self.notation_widget.update_history(self.game_tree.get_san_history())
+                self._update_board_and_notation()
                 self.status_game_label.setText("FEN position loaded.")
             else:
                 QMessageBox.warning(self, "Error", "Invalid FEN position string!")
+
+    def _is_rp2350_selected(self) -> bool:
+        """Return True if RP2350 USB Hardware Engine is selected target."""
+        return self.engine_target_combo.currentData() == "RP2350_USB_CDC"
 
     @Slot(str)
     def on_user_move(self, uci_move: str) -> None:
@@ -265,7 +322,7 @@ class MainWindow(QMainWindow):
             
             # Send updated position to active engine target
             moves_list = [m.uci() for m in self.game_tree.move_history]
-            if self.engine_target_combo.currentIndex() == 1:
+            if self._is_rp2350_selected():
                 self.rp2350_controller.set_position(moves=moves_list)
             else:
                 self.uci_controller.set_position(moves=moves_list)
@@ -334,7 +391,7 @@ class MainWindow(QMainWindow):
         if self.custom_time_ms is not None:
             t_ms = self.custom_time_ms
 
-        is_rp2350 = (self.engine_target_combo.currentIndex() == 1)
+        is_rp2350 = self._is_rp2350_selected()
         controller = self.rp2350_controller if is_rp2350 else self.uci_controller
 
         if is_rp2350 and not self.rp2350_controller.serial_inst:
@@ -355,7 +412,7 @@ class MainWindow(QMainWindow):
     @Slot()
     def on_engine_stop(self) -> None:
         """Stop active engine search."""
-        if self.engine_target_combo.currentIndex() == 1:
+        if self._is_rp2350_selected():
             self.rp2350_controller.stop_search()
         else:
             self.uci_controller.stop_search()
@@ -365,27 +422,114 @@ class MainWindow(QMainWindow):
         """Called when UCI engine process responds with uciok."""
         self.status_game_label.setText(f"Engine connected: {engine_name}")
 
+    @Slot(int)
+    def on_engine_target_changed(self, index: int) -> None:
+        """Handle engine target dropdown selection change."""
+        if not self._is_rp2350_selected():
+            eng_path = self.engine_target_combo.currentData()
+            if eng_path and isinstance(eng_path, str) and eng_path != self.uci_controller.engine_path:
+                self.uci_controller.engine_path = eng_path
+                self.uci_controller.start_engine()
+
+    def _populate_engine_target_combo(self) -> None:
+        """Populate main engine target combo box from EngineRegistry."""
+        self.engine_target_combo.clear()
+        for eng in self.engine_registry.engines:
+            if eng.is_hardware:
+                self.engine_target_combo.addItem(f"Target: {eng.name}", eng.path)
+            else:
+                self.engine_target_combo.addItem(f"Target: {eng.name}", eng.path)
+
     @Slot(dict)
     def on_search_progress(self, info: dict) -> None:
-        """Update live analysis panel with search depth, centipawn/mate score, and PV line."""
+        """Update live analysis panel with search depth, centipawn/mate score, PV line, and eval widgets."""
         depth = info.get("depth", 0)
+        ply = len(self.game_tree.move_history)
+        multipv_idx = info.get("multipv", 1)
+        pv_moves = info.get("pv", [])
         
-        # Score string
+        # Score parsing
         if "score_mate" in info:
             m = info["score_mate"]
             score_str = f"Mate in {m}"
+            self.eval_bar_widget.set_eval(None, is_mate=True, mate_in=m)
         elif "score_cp" in info:
             cp = info["score_cp"]
             # Format from White's perspective
             w_cp = cp if self.game_tree.board.turn == chess.WHITE else -cp
             score_str = f"{'+' if w_cp >= 0 else ''}{w_cp / 100.0:.2f}"
+            self.eval_bar_widget.set_eval(w_cp)
+            
+            # Record in timeline history graph
+            self._record_eval(ply, float(w_cp))
         else:
             score_str = "+0.00"
 
         self.eval_label.setText(f"Score: {score_str} | Depth: {depth}")
 
-        if "pv" in info:
-            self.pv_label.setText(f"PV: {' '.join(info['pv'])}")
+        if pv_moves:
+            pv_str = " ".join(pv_moves)
+            if multipv_idx > 1:
+                self.pv_label.setText(f"PV #{multipv_idx} ({score_str}): {pv_str}")
+            else:
+                self.pv_label.setText(f"PV: {pv_str}")
+
+        # Broadcast live search variation to all open auxiliary analysis boards
+        for dock in self.aux_boards:
+            widget = dock.widget()
+            if isinstance(widget, AuxBoardWidget):
+                widget.update_live_pv(multipv_idx, pv_moves, score_str, depth)
+
+    def _record_eval(self, ply: int, score_cp: float) -> None:
+        """Record evaluation score for current ply in timeline graph dataset."""
+        # Replace existing entry for ply if already present, or append
+        filtered = [entry for entry in self.eval_history if entry[0] != ply]
+        filtered.append((ply, score_cp))
+        filtered.sort(key=lambda x: x[0])
+        self.eval_history = filtered
+        self.eval_graph_widget.set_eval_history(self.eval_history)
+
+    @Slot(int)
+    def on_multipv_changed(self, index: int) -> None:
+        """Update Multi-PV count on engine."""
+        counts = [1, 2, 3, 5]
+        count = counts[index] if 0 <= index < len(counts) else 1
+        self.uci_controller.set_multipv(count)
+        self.status_game_label.setText(f"Engine Multi-PV search set to {count} variation lines.")
+
+    @Slot(int)
+    def on_aux_request_multipv(self, count: int) -> None:
+        """Ensure main engine Multi-PV setting is at least equal to requested count."""
+        index_map = {1: 0, 2: 1, 3: 2, 5: 3}
+        if count in index_map:
+            target_idx = index_map[count]
+            if self.multipv_combo.currentIndex() < target_idx:
+                self.multipv_combo.setCurrentIndex(target_idx)
+
+    @Slot()
+    def on_add_aux_board(self) -> None:
+        """Create and display a new auxiliary analysis board dock widget."""
+        count = len(self.aux_boards) + 1
+        aux_widget = AuxBoardWidget(f"Auxiliary Board #{count}", self.engine_registry, self)
+        aux_widget.set_main_board_fen(self.game_tree.board.fen())
+
+        dock_aux = QDockWidget(f"Auxiliary Analysis Board #{count}", self)
+        dock_aux.setWidget(aux_widget)
+        dock_aux.setMinimumWidth(300)
+
+        aux_widget.sync_requested.connect(self.on_sync_aux_to_main)
+        aux_widget.request_multipv.connect(self.on_aux_request_multipv)
+
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock_aux)
+        self.aux_boards.append(dock_aux)
+
+    @Slot(str)
+    def on_sync_aux_to_main(self, fen: str) -> None:
+        """Sync position from auxiliary board to main board."""
+        if self.game_tree.load_fen(fen):
+            self.board_widget.set_board(self.game_tree.board)
+            self.notation_widget.update_history(self.game_tree.get_san_history())
+            self.status_game_label.setText("Synced position from Auxiliary Board to Main Board.")
 
     @Slot(str, str)
     def on_best_move_found(self, best_move: str, ponder_move: str) -> None:
@@ -405,6 +549,8 @@ class MainWindow(QMainWindow):
         """Open file dialog to select external UCI engine binary."""
         file_path, _ = QFileDialog.getOpenFileName(self, "Select UCI Engine Executable", "", "Executables (*)")
         if file_path:
+            name = os.path.basename(file_path)
+            self.engine_registry.add_custom_engine(name, file_path)
             self.uci_controller.engine_path = file_path
             self.uci_controller.start_engine()
 
@@ -439,6 +585,15 @@ class MainWindow(QMainWindow):
         last_move = self.game_tree.move_history[-1] if self.game_tree.move_history else None
         self.board_widget.set_board(self.game_tree.board, last_move=last_move)
         self.notation_widget.update_history(self.game_tree.get_san_history())
+        self._notify_aux_boards_position_changed()
+
+    def _notify_aux_boards_position_changed(self) -> None:
+        """Broadcast current main board FEN position to all open auxiliary boards."""
+        fen = self.game_tree.board.fen()
+        for dock in self.aux_boards:
+            widget = dock.widget()
+            if isinstance(widget, AuxBoardWidget):
+                widget.set_main_board_fen(fen)
 
 
 def main() -> None:

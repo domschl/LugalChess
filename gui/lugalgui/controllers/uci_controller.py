@@ -60,6 +60,11 @@ class UCIController(QObject):
             self.log_received.emit(f"Failed to launch engine process: {e}")
             return False
 
+    @property
+    def is_running(self) -> bool:
+        """Return True if engine process is active."""
+        return self._is_running and self.process is not None
+
     def stop_engine(self) -> None:
         """Terminate the running UCI engine process."""
         self._is_running = False
@@ -105,8 +110,12 @@ class UCIController(QObject):
             self.send_command(f"go movetime {time_limit_ms}")
 
     def start_search_depth(self, depth: int) -> None:
-        """Start engine search with a fixed depth limit."""
+        """Start search to fixed depth limit."""
         self.send_command(f"go depth {depth}")
+
+    def set_multipv(self, count: int) -> None:
+        """Set engine MultiPV search count."""
+        self.send_command(f"setoption name MultiPV value {count}")
 
     def stop_search(self) -> None:
         """Send stop command to interrupt current search."""
@@ -158,6 +167,9 @@ class UCIController(QObject):
             tok = tokens[i]
             if tok == "depth" and i + 1 < len(tokens):
                 info["depth"] = int(tokens[i + 1])
+                i += 2
+            elif tok == "multipv" and i + 1 < len(tokens):
+                info["multipv"] = int(tokens[i + 1])
                 i += 2
             elif tok == "score" and i + 2 < len(tokens):
                 score_type = tokens[i + 1]

@@ -20,4 +20,6 @@ __pycache__/
 *$py.class
 .venv/
 .pytest_cache/
-.uv/
+# Engine output files (Crafty, etc.)
+game.*
+log.*
