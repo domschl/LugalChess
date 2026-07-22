@@ -21,6 +21,8 @@ class UCIController(QObject):
         super().__init__(parent)
         self.engine_path: str | None = engine_path
         self.engine_args: list[str] = []
+        self.elo_handicap: int | None = None
+        self.depth_limit: int | None = None
         self.process: subprocess.Popen[str] | None = None
         self.reader_thread: threading.Thread | None = None
         self._is_running: bool = False
@@ -34,7 +36,7 @@ class UCIController(QObject):
             self.engine_path = engine_executable_path
             
         if not self.engine_path or not os.path.exists(self.engine_path):
-            self.log_received.emit(f"Error: Engine executable not found at '{self.engine_path}'")
+            self.log_received.emit(f"Engine executable not found: {self.engine_path}")
             return False
 
         self.stop_engine()
@@ -57,6 +59,12 @@ class UCIController(QObject):
 
             # Initialize UCI handshake
             self.send_command("uci")
+
+            # Apply UCI ELO handicap if configured
+            if self.elo_handicap is not None:
+                self.send_command("setoption name UCI_LimitStrength value true")
+                self.send_command(f"setoption name UCI_Elo value {self.elo_handicap}")
+
             return True
         except Exception as e:
             self.log_received.emit(f"Failed to launch engine process: {e}")
@@ -106,10 +114,16 @@ class UCIController(QObject):
 
     def start_search_time(self, time_limit_ms: int) -> None:
         """Start engine search with a fixed time limit per move in ms."""
-        if time_limit_ms <= 0:
-            self.send_command("go infinite")
+        cmd = "go"
+        if time_limit_ms > 0:
+            cmd += f" movetime {time_limit_ms}"
         else:
-            self.send_command(f"go movetime {time_limit_ms}")
+            cmd += " infinite"
+
+        if self.depth_limit is not None:
+            cmd += f" depth {self.depth_limit}"
+
+        self.send_command(cmd)
 
     def start_search_depth(self, depth: int) -> None:
         """Start search to fixed depth limit."""

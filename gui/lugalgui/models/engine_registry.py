@@ -15,12 +15,16 @@ class EngineInfo:
         args: list[str] | None = None,
         is_hardware: bool = False,
         is_xboard: bool = False,
+        elo_handicap: int | None = None,
+        depth_limit: int | None = None,
     ) -> None:
         self.name: str = name
         self.path: str = path
         self.args: list[str] = args or []
         self.is_hardware: bool = is_hardware
         self.is_xboard: bool = is_xboard
+        self.elo_handicap: int | None = elo_handicap
+        self.depth_limit: int | None = depth_limit
 
     def __repr__(self) -> str:
         return f"EngineInfo({self.name}, {self.path}, args={self.args}, is_xboard={self.is_xboard})"

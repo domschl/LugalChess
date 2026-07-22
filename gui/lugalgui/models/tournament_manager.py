@@ -142,11 +142,14 @@ class TournamentMatchWorker(QThread):
                 ctrl.connect_serial()
             return ctrl
         elif info.is_xboard:
-            return XBoardAdapter(info.path, args=info.args)
+            xb_ctrl = XBoardAdapter(info.path, args=info.args)
+            return xb_ctrl
         else:
             uci_ctrl = UCIController()
             uci_ctrl.engine_path = info.path
             uci_ctrl.engine_args = info.args
+            uci_ctrl.elo_handicap = info.elo_handicap
+            uci_ctrl.depth_limit = info.depth_limit
             return uci_ctrl
 
     def _stop_controllers(self, c1: Any, c2: Any) -> None:

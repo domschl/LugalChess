@@ -86,22 +86,38 @@ class RP2350Controller(QObject):
                 return p.device
         return None
 
+    @property
+    def is_connected(self) -> bool:
+        """Return True if RP2350 serial connection is active."""
+        if self.serial_inst and self.serial_inst.is_open:
+            return True
+        return self.connect_serial()
+
+    def connect_serial(self, port: str | None = None) -> bool:
+        """Attempt to open RP2350 USB CDC serial port."""
+        if self.serial_inst and self.serial_inst.is_open:
+            return True
+
+        if not port:
+            port = self._find_rp2350_port()
+
+        if port:
+            try:
+                self.serial_inst = serial.Serial(port, 115200, timeout=1.0)
+                self.port_name = port
+                self.device_connected.emit(port)
+                self.send_command("uci")
+                return True
+            except Exception:
+                self.serial_inst = None
+                return False
+        return False
+
     def _connection_loop(self) -> None:
         """Background thread loop managing connection and serial line reading."""
         while self._is_running:
             if not self.serial_inst or not self.serial_inst.is_open:
-                port = self._find_rp2350_port()
-                if port:
-                    try:
-                        self.serial_inst = serial.Serial(port, 115200, timeout=1.0)
-                        self.port_name = port
-                        self.device_connected.emit(port)
-                        # Initialize UCI handshake over USB CDC
-                        self.send_command("uci")
-                    except Exception:
-                        self.serial_inst = None
-                        time.sleep(2.0)
-                else:
+                if not self.connect_serial():
                     time.sleep(2.0)
                     continue
 
