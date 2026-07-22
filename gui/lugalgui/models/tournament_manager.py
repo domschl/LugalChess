@@ -86,8 +86,11 @@ class TournamentMatchWorker(QThread):
                 moves_uci = [m.uci() for m in board.move_stack]
                 active_ctrl.set_position(moves=moves_uci)
 
-                # Wait for move from active engine
-                chosen_move_uci = self._get_engine_move(active_ctrl, self.time_limit_ms)
+                active_info = white_info if board.turn == chess.WHITE else black_info
+                allocated_time_ms = int(self.time_limit_ms * getattr(active_info, "time_multiplier", 1.0))
+
+                # Wait for move from active engine with scaled time budget
+                chosen_move_uci = self._get_engine_move(active_ctrl, allocated_time_ms)
 
                 if not chosen_move_uci:
                     # Engine failed / timed out -> forfeit

@@ -59,11 +59,13 @@ class UCIController(QObject):
 
             # Initialize UCI handshake
             self.send_command("uci")
+            self.send_command("isready")
 
             # Apply UCI ELO handicap if configured
             if self.elo_handicap is not None:
                 self.send_command("setoption name UCI_LimitStrength value true")
                 self.send_command(f"setoption name UCI_Elo value {self.elo_handicap}")
+                self.send_command("isready")
 
             return True
         except Exception as e:

@@ -17,6 +17,7 @@ class EngineInfo:
         is_xboard: bool = False,
         elo_handicap: int | None = None,
         depth_limit: int | None = None,
+        time_multiplier: float = 1.0,
     ) -> None:
         self.name: str = name
         self.path: str = path
@@ -25,6 +26,7 @@ class EngineInfo:
         self.is_xboard: bool = is_xboard
         self.elo_handicap: int | None = elo_handicap
         self.depth_limit: int | None = depth_limit
+        self.time_multiplier: float = time_multiplier
 
     def __repr__(self) -> str:
         return f"EngineInfo({self.name}, {self.path}, args={self.args}, is_xboard={self.is_xboard})"
@@ -71,8 +73,8 @@ class EngineRegistry(QObject):
         if lc0_path:
             self.engines.append(EngineInfo("Lc0 (System PATH)", lc0_path))
 
-        # 3. Add RP2350 USB Hardware Engine option
-        self.engines.append(EngineInfo("RP2350 USB Hardware Engine", "RP2350_USB_CDC", is_hardware=True))
+        # 3. Add RP2350 USB Hardware Engine option (with 15x time odds budget for MCU)
+        self.engines.append(EngineInfo("RP2350 USB Hardware Engine (15x Time Odds)", "RP2350_USB_CDC", is_hardware=True, time_multiplier=15.0))
 
         self.registry_updated.emit()
 
