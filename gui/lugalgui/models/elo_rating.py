@@ -37,24 +37,26 @@ class EloRatingCalculator:
     def calculate_ratings(
         engine_names: list[str],
         match_results: list[tuple[str, str, float]],
+        initial_elos: dict[str, float] | None = None,
         base_elo: float = 1500.0,
-        anchor_engine: str | None = None,
-        anchor_elo: float = 2800.0,
         max_iterations: int = 100,
         tolerance: float = 1e-4,
     ) -> dict[str, EngineEloStats]:
         """Compute relative ELO ratings from a list of match results (white_name, black_name, result).
         
-        result is 1.0 for White win, 0.5 for draw, 0.0 for Black win.
+        initial_elos can optionally map engine names to assumed benchmark ELO values (e.g. Stockfish 1800 -> 1800.0).
         """
-        stats: dict[str, EngineEloStats] = {name: EngineEloStats(name=name, elo=base_elo) for name in engine_names}
+        initial_map = initial_elos or {}
+        stats: dict[str, EngineEloStats] = {
+            name: EngineEloStats(name=name, elo=initial_map.get(name, base_elo)) for name in engine_names
+        }
 
         # 1. Accumulate W/D/L records
         for white, black, score in match_results:
             if white not in stats:
-                stats[white] = EngineEloStats(name=white, elo=base_elo)
+                stats[white] = EngineEloStats(name=white, elo=initial_map.get(white, base_elo))
             if black not in stats:
-                stats[black] = EngineEloStats(name=black, elo=base_elo)
+                stats[black] = EngineEloStats(name=black, elo=initial_map.get(black, base_elo))
 
             if score == 1.0:
                 stats[white].wins += 1
@@ -70,8 +72,9 @@ class EloRatingCalculator:
         if not active_engines or len(active_engines) < 2:
             return stats
 
-        # Initialize ratings
-        ratings = {name: base_elo for name in active_engines}
+        # Initialize solver ratings with initial seed ELOs
+        ratings = {name: initial_map.get(name, base_elo) for name in active_engines}
+        anchored_engines = [n for n in active_engines if n in initial_map]
 
         # 2. Bradley-Terry Iterative Newton-Raphson Solver
         for _ in range(max_iterations):
@@ -106,13 +109,14 @@ class EloRatingCalculator:
 
             ratings = new_ratings
 
-            # Normalize anchor engine if specified (e.g. Stockfish = 2800)
-            if anchor_engine and anchor_engine in ratings:
-                offset = anchor_elo - ratings[anchor_engine]
+            # Normalize ratings relative to benchmark initial ELOs if present
+            if anchored_engines:
+                avg_assumed = sum(initial_map[n] for n in anchored_engines) / len(anchored_engines)
+                avg_current = sum(ratings[n] for n in anchored_engines) / len(anchored_engines)
+                offset = avg_assumed - avg_current
                 for k in ratings:
                     ratings[k] += offset
             else:
-                # Keep average ELO centered at base_elo
                 avg = sum(ratings.values()) / len(ratings)
                 offset = base_elo - avg
                 for k in ratings:

@@ -295,8 +295,11 @@ class TournamentView(QWidget):
         if not participant_names:
             return
 
-        # Compute live ratings & W-D-L stats
-        elo_stats = EloRatingCalculator.calculate_ratings(participant_names, match_results)
+        # Build assumed benchmark ELO map for rating scale anchoring
+        initial_elos = {eng.name: getattr(eng, "assumed_elo", 1500.0) for eng in self.engine_registry.engines}
+
+        # Compute live ratings & W-D-L stats anchored to official rating scale
+        elo_stats = EloRatingCalculator.calculate_ratings(participant_names, match_results, initial_elos=initial_elos)
         sorted_stats = sorted(elo_stats.values(), key=lambda s: (s.points, s.elo), reverse=True)
         sorted_names = [s.name for s in sorted_stats]
 
