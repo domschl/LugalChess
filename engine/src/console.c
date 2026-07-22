@@ -21,12 +21,28 @@ static int search_level = 2;
 static const int level_times_ms[8] = { 1000, 2000, 5000, 10000, 15000, 30000, 60000, -1 };
 static int last_search_score_white = 0;
 static bool has_last_search_score = false;
+static bool is_uci_client_mode = false;
 
 static bool check_and_display_game_over(Position *pos);
 static void check_and_update_check_status(Position *pos);
+static void format_move_str(Move move, char *move_str) {
+    int from = MOVE_FROM(move);
+    int to = MOVE_TO(move);
+    move_str[0] = 'a' + (from % 8);
+    move_str[1] = '1' + (from / 8);
+    move_str[2] = 'a' + (to % 8);
+    move_str[3] = '1' + (to / 8);
+    if (move_is_promo(move)) {
+        int promo = move_promo_piece(move);
+        const char promo_chars[] = "pnbrqk";
+        move_str[4] = promo_chars[promo];
+        move_str[5] = '\0';
+    } else {
+        move_str[4] = '\0';
+    }
+}
 
 #if defined(__arm__) || defined(PICO_BOARD)
-static void format_move_str(Move move, char *move_str);
 static void sync_moves_from_history(const Position *pos);
 #endif
 
@@ -159,22 +175,7 @@ static void format_score_str(int score, char *score_str) {
     }
 }
 
-static void format_move_str(Move move, char *move_str) {
-    int from = MOVE_FROM(move);
-    int to = MOVE_TO(move);
-    move_str[0] = 'a' + (from % 8);
-    move_str[1] = '1' + (from / 8);
-    move_str[2] = 'a' + (to % 8);
-    move_str[3] = '1' + (to / 8);
-    if (move_is_promo(move)) {
-        int promo = move_promo_piece(move);
-        const char promo_chars[] = "pnbrqk";
-        move_str[4] = promo_chars[promo];
-        move_str[5] = '\0';
-    } else {
-        move_str[4] = '\0';
-    }
-}
+
 
 static void show_board_rank(const Position *pos, int rank) {
     // 1. Flash rank number first
@@ -1039,8 +1040,10 @@ void console_loop(void) {
 
     char line[512];
     while (1) {
-        printf("\nLugalChess> ");
-        fflush(stdout);
+        if (!is_uci_client_mode) {
+            printf("\nLugalChess> ");
+            fflush(stdout);
+        }
 
         get_line_custom(line, sizeof(line));
 
@@ -1048,24 +1051,88 @@ void console_loop(void) {
         line[strcspn(line, "\n")] = '\0';
         line[strcspn(line, "\r")] = '\0';
 
-
         // Skip empty input
         if (strlen(line) == 0) {
             continue;
         }
 
-        if (strcmp(line, "help") == 0) {
+        if (strcmp(line, "uci") == 0) {
+            is_uci_client_mode = true;
+            printf("id name LugalChess 1.0\n");
+            printf("id author Antigravity\n");
+            printf("option name Hash type spin default 16 min 1 max 256\n");
+            printf("uciok\n");
+            fflush(stdout);
+        }
+        else if (strcmp(line, "isready") == 0) {
+            is_uci_client_mode = true;
+            printf("readyok\n");
+            fflush(stdout);
+        }
+        else if (strcmp(line, "ucinewgame") == 0) {
+            is_uci_client_mode = true;
+            clear_tt();
+        }
+        else if (strncmp(line, "position", 8) == 0) {
+            is_uci_client_mode = true;
+            char *ptr = line + 8;
+            while (*ptr == ' ') ptr++;
+
+            if (strncmp(ptr, "startpos", 8) == 0) {
+                parse_fen(&pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+                ptr += 8;
+            } else if (strncmp(ptr, "fen", 3) == 0) {
+                ptr += 3;
+                while (*ptr == ' ') ptr++;
+                char fen[512];
+                int fen_len = 0;
+                while (*ptr != '\0' && strncmp(ptr, "moves", 5) != 0) {
+                    fen[fen_len++] = *ptr++;
+                }
+                while (fen_len > 0 && fen[fen_len - 1] == ' ') fen_len--;
+                fen[fen_len] = '\0';
+                parse_fen(&pos, fen);
+            }
+
+            char *moves_ptr = strstr(ptr, "moves");
+            if (moves_ptr != NULL) {
+                moves_ptr += 5;
+                while (*moves_ptr != '\0') {
+                    while (*moves_ptr == ' ') moves_ptr++;
+                    if (*moves_ptr == '\0') break;
+
+                    char move_str[10];
+                    int len = 0;
+                    while (*moves_ptr != ' ' && *moves_ptr != '\0' && len < 9) {
+                        move_str[len++] = *moves_ptr++;
+                    }
+                    move_str[len] = '\0';
+                    execute_player_move(&pos, move_str);
+                }
+            }
+
+#if defined(__arm__) || defined(PICO_BOARD)
+            sync_moves_from_history(&pos);
+            update_tm1638_display();
+#endif
+        }
+        else if (strcmp(line, "help") == 0) {
             print_help();
         } 
-        else if (strcmp(line, "new") == 0) {
+        else if (strcmp(line, "new") == 0 || strcmp(line, "ucinewgame") == 0) {
             parse_fen(&pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
-            printf("New game started.\n");
-            print_board(&pos);
+            clear_tt();
+            if (!is_uci_client_mode) {
+                printf("New game started.\n");
+                print_board(&pos);
+            }
 #if defined(__arm__) || defined(PICO_BOARD)
             strcpy(game_status_msg, "");
             display_show_moves = true;
             sync_moves_from_history(&pos);
             update_tm1638_display();
+            printf("ucinewgame\n");
+            fflush(stdout);
 #endif
             max_history_ply = pos.history_ply;
         } 
@@ -1180,11 +1247,76 @@ void console_loop(void) {
                 }
             }
         } 
-        else if (strcmp(line, "go") == 0) {
-            make_engine_move(&pos);
-            print_board(&pos);
-            if (!check_and_display_game_over(&pos)) {
-                check_and_update_check_status(&pos);
+        else if (strncmp(line, "go", 2) == 0 && (line[2] == '\0' || line[2] == ' ')) {
+            int max_depth = 64;
+            int time_limit = -1;
+
+            char *movetime_ptr = strstr(line, "movetime");
+            if (movetime_ptr != NULL) {
+                time_limit = atoi(movetime_ptr + 8);
+            } else {
+                char *depth_ptr = strstr(line, "depth");
+                if (depth_ptr != NULL) {
+                    max_depth = atoi(depth_ptr + 5);
+                } else if (pos.side == WHITE) {
+                    char *wtime_ptr = strstr(line, "wtime");
+                    if (wtime_ptr != NULL) {
+                        time_limit = atoi(wtime_ptr + 5) / 20;
+                    } else {
+                        time_limit = level_times_ms[search_level - 1];
+                    }
+                } else {
+                    char *btime_ptr = strstr(line, "btime");
+                    if (btime_ptr != NULL) {
+                        time_limit = atoi(btime_ptr + 5) / 20;
+                    } else {
+                        time_limit = level_times_ms[search_level - 1];
+                    }
+                }
+            }
+
+            stop_search = false;
+#if defined(__arm__) || defined(PICO_BOARD)
+            current_search_best_move = 0;
+            current_search_score = 0;
+            current_search_depth = 1;
+#endif
+
+            search_position(&pos, max_depth, time_limit);
+
+            Move best_move = 0;
+            int score = 0;
+#if defined(__arm__) || defined(PICO_BOARD)
+            best_move = current_search_best_move;
+            score = current_search_score;
+#endif
+            if (best_move == 0 || score == 0) {
+                int tt_score = 0;
+                Move tt_move = 0;
+                if (probe_tt_entry(pos.hash_key, &tt_score, &tt_move)) {
+                    if (best_move == 0) best_move = tt_move;
+                    if (score == 0) score = tt_score;
+                }
+            }
+            if (best_move == 0) best_move = get_tt_best_move(pos.hash_key);
+
+            if (best_move != 0) {
+                char move_str[6] = "";
+                format_move_str(best_move, move_str);
+                make_move(&pos, best_move);
+#if defined(__arm__) || defined(PICO_BOARD)
+                strncpy(last_engine_move, move_str, 5);
+                last_engine_move[5] = '\0';
+                update_tm1638_display();
+                printf("bestmove %s\n", move_str);
+                fflush(stdout);
+#endif
+                if (!is_uci_client_mode) {
+                    print_board(&pos);
+                }
+                if (!check_and_display_game_over(&pos)) {
+                    check_and_update_check_status(&pos);
+                }
             }
         } 
         else if (strcmp(line, "undo") == 0) {
@@ -1261,6 +1393,8 @@ void console_loop(void) {
                 last_player_move[5] = '\0';
                 strcpy(last_engine_move, "     ");
                 update_tm1638_display();
+                printf("bestmove %s\n", line);
+                fflush(stdout);
 #endif
                 print_board(&pos);
 

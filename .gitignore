@@ -13,3 +13,11 @@ cmake_install.cmake
 .ninja_*
 ninja.rules
 ninja_deps
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+.pytest_cache/
+.uv/

@@ -16,20 +16,20 @@ add_executable(lugalchess_firmware
     main.c
     tm1638.c
     st7735.c
-    ../src/bitboard.c
-    ../src/position.c
-    ../src/movegen.c
-    ../src/zobrist.c
-    ../src/tt.c
-    ../src/evaluation.c
-    ../src/search.c
-    ../src/uci.c
-    ../src/console.c
+    ../engine/src/bitboard.c
+    ../engine/src/position.c
+    ../engine/src/movegen.c
+    ../engine/src/zobrist.c
+    ../engine/src/tt.c
+    ../engine/src/evaluation.c
+    ../engine/src/search.c
+    ../engine/src/uci.c
+    ../engine/src/console.c
 )
 
 # Include search path for headers
 target_include_directories(lugalchess_firmware PRIVATE
-    ${CMAKE_CURRENT_LIST_DIR}/../src
+    ${CMAKE_CURRENT_LIST_DIR}/../engine/include
     ${CMAKE_CURRENT_LIST_DIR}
 )
 
@@ -59,7 +59,7 @@ add_executable(test_tm1638
 )
 
 target_include_directories(test_tm1638 PRIVATE
-    ${CMAKE_CURRENT_LIST_DIR}/../src
+    ${CMAKE_CURRENT_LIST_DIR}/../engine/include
 )
 
 target_link_libraries(test_tm1638 PRIVATE

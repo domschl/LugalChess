@@ -130,25 +130,21 @@ void uci_loop(void) {
                     parse_and_make_move(&pos, move_str);
                 }
             }
-        } else if (strncmp(line, "go", 2) == 0) {
-            int depth = 8; // Default search depth
+        } else if (strncmp(line, "go", 2) == 0 && (line[2] == '\0' || line[2] == ' ')) {
+            int depth = 64; // Default max depth for iterative deepening
             int time_ms = -1; // Infinite time by default
-
-            char *depth_ptr = strstr(line, "depth");
-            if (depth_ptr != NULL) {
-                depth = atoi(depth_ptr + 5);
-            }
 
             char *movetime_ptr = strstr(line, "movetime");
             if (movetime_ptr != NULL) {
                 time_ms = atoi(movetime_ptr + 8);
             } else {
-                // Parse wtime/btime for active color time limits
-                if (pos.side == WHITE) {
+                char *depth_ptr = strstr(line, "depth");
+                if (depth_ptr != NULL) {
+                    depth = atoi(depth_ptr + 5);
+                } else if (pos.side == WHITE) {
                     char *wtime_ptr = strstr(line, "wtime");
                     if (wtime_ptr != NULL) {
                         int wtime = atoi(wtime_ptr + 5);
-                        // Allocate 1/20th of remaining time
                         time_ms = wtime / 20;
                     }
                 } else {
