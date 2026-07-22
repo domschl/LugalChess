@@ -50,7 +50,6 @@ class EngineRegistry(QObject):
         known_engines = [
             ("stockfish", [], False),
             ("lc0", [], False),
-            ("komodo", [], False),
             ("crafty", [], True),  # Crafty uses XBoard protocol
             ("gnuchess", ["--uci"], False),
         ]

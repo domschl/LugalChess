@@ -34,6 +34,7 @@ from lugalgui.views.board_widget import ChessBoardWidget
 from lugalgui.views.eval_bar_widget import EvalBarWidget
 from lugalgui.views.eval_graph_widget import EvalGraphWidget
 from lugalgui.views.notation_widget import NotationWidget
+from lugalgui.views.tournament_view import TournamentView
 
 
 class MainWindow(QMainWindow):
@@ -57,6 +58,7 @@ class MainWindow(QMainWindow):
 
         self.eval_history: list[tuple[int, float]] = []
         self.aux_boards: list[QDockWidget] = []
+        self.tournament_window: TournamentView | None = None
 
         # Default local engine executable
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -208,6 +210,11 @@ class MainWindow(QMainWindow):
         act_select_engine = QAction("Select &UCI Engine Executable...", self)
         act_select_engine.triggered.connect(self.on_select_engine_binary)
         engine_menu.addAction(act_select_engine)
+
+        act_tournament = QAction("Engine &Tournaments & ELO Ratings...", self)
+        act_tournament.setShortcut(QKeySequence("Ctrl+T"))
+        act_tournament.triggered.connect(self.on_open_tournament_view)
+        engine_menu.addAction(act_tournament)
 
         # Level Menu (Levels 1 to 8 + Custom)
         level_menu = menubar.addMenu("&Level")
@@ -465,6 +472,15 @@ class MainWindow(QMainWindow):
                 self.engine_target_combo.addItem(f"Target: {eng.name}", eng.path)
             else:
                 self.engine_target_combo.addItem(f"Target: {eng.name}", eng.path)
+
+    @Slot()
+    def on_open_tournament_view(self) -> None:
+        """Open Engine Tournament & ELO Ratings workspace window."""
+        if not self.tournament_window:
+            self.tournament_window = TournamentView(self.engine_registry)
+        self.tournament_window.show()
+        self.tournament_window.raise_()
+        self.tournament_window.activateWindow()
 
     @Slot(dict)
     def on_search_progress(self, info: dict) -> None:
