@@ -6,6 +6,7 @@
 #include "evaluation.h"
 #include "tt.h"
 #include <sys/time.h>
+#include <time.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -480,6 +481,7 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
     }
 
     start_search_time_ms = get_time_ms();
+    srand((unsigned int)(time(NULL) ^ start_search_time_ms));
     max_search_time_ms = time_limit_ms;
     stop_search = false;
     nodes_searched = 0;
@@ -488,9 +490,18 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
     // Reset move ordering heuristics
     memset(killer_moves, 0, sizeof(killer_moves));
     
+    MoveList root_list;
+    generate_moves(pos, &root_list);
     Move best_move = 0;
-    int best_score = -INFINITY_VALUE;
+    for (int i = 0; i < root_list.count; i++) {
+        if (make_move(pos, root_list.moves[i])) {
+            unmake_move(pos);
+            best_move = root_list.moves[i];
+            break;
+        }
+    }
 
+    int best_score = -INFINITY_VALUE;
     long prev_iter_time_ms = 0;
 
     // Iterative Deepening
@@ -501,10 +512,6 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
         search_progress_callback(0, 0, d);
         int score = pv_search(pos, d, 0, -INFINITY_VALUE, INFINITY_VALUE, true);
         
-        if (stop_search) {
-            break;
-        }
-
         Move temp_move = 0;
         int temp_score = 0;
         if (read_tt(pos->hash_key, d, -INFINITY_VALUE, INFINITY_VALUE, &temp_score, &temp_move) && temp_move != 0) {
@@ -516,6 +523,10 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
             }
         }
         best_score = score;
+
+        if (stop_search) {
+            break;
+        }
 
         // Send progress callback with current best move and score for this completed depth
         search_progress_callback(best_move, best_score, d);
