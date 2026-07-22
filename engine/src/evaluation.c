@@ -266,19 +266,19 @@ int evaluate(const Position *pos) {
             if (b_home_minors >= 3) b_dev_score -= 30;
         }
 
-        // 4. Heavy Penalty for Trapped / Constipated Bishops blocked by own pawns
+        // 4. Calibrated Penalty for Trapped Bishops blocked by own pawns (-25 cp)
         // White C1 Bishop trapped by BOTH B2 and D2 pawns
         if (pos->board[C1] == BISHOP && (pos->color_bbs[WHITE] & (1ULL << C1))) {
             if ((pos->board[B2] == PAWN && (pos->color_bbs[WHITE] & (1ULL << B2))) &&
                 (pos->board[D2] == PAWN && (pos->color_bbs[WHITE] & (1ULL << D2)))) {
-                w_dev_score -= 50; // Trapped C1 bishop has 0 exit diagonals!
+                w_dev_score -= 25; // Trapped C1 bishop has 0 exit diagonals!
             }
         }
         // White F1 Bishop trapped by BOTH E2 and G2 pawns
         if (pos->board[F1] == BISHOP && (pos->color_bbs[WHITE] & (1ULL << F1))) {
             if ((pos->board[E2] == PAWN && (pos->color_bbs[WHITE] & (1ULL << E2))) &&
                 (pos->board[G2] == PAWN && (pos->color_bbs[WHITE] & (1ULL << G2)))) {
-                w_dev_score -= 50; // Trapped F1 bishop has 0 exit diagonals!
+                w_dev_score -= 25; // Trapped F1 bishop has 0 exit diagonals!
             }
         }
 
@@ -286,14 +286,14 @@ int evaluate(const Position *pos) {
         if (pos->board[C8] == BISHOP && (pos->color_bbs[BLACK] & (1ULL << C8))) {
             if ((pos->board[B7] == PAWN && (pos->color_bbs[BLACK] & (1ULL << B7))) &&
                 (pos->board[D7] == PAWN && (pos->color_bbs[BLACK] & (1ULL << D7)))) {
-                b_dev_score -= 50; // Trapped C8 bishop has 0 exit diagonals!
+                b_dev_score -= 25; // Trapped C8 bishop has 0 exit diagonals!
             }
         }
         // Black F8 Bishop trapped by BOTH E7 and G7 pawns
         if (pos->board[F8] == BISHOP && (pos->color_bbs[BLACK] & (1ULL << F8))) {
             if ((pos->board[E7] == PAWN && (pos->color_bbs[BLACK] & (1ULL << E7))) &&
                 (pos->board[G7] == PAWN && (pos->color_bbs[BLACK] & (1ULL << G7)))) {
-                b_dev_score -= 50; // Trapped F8 bishop has 0 exit diagonals!
+                b_dev_score -= 25; // Trapped F8 bishop has 0 exit diagonals!
             }
         }
 
