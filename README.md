@@ -108,13 +108,45 @@ cmake --build build
 
 ## 🔌 3. RP2350 Microcontroller Build (Pico SDK)
 
+### Prerequisites (ARM Toolchain)
+
+#### Debian / Ubuntu / Raspberry Pi OS
+```bash
+sudo apt update
+sudo apt install gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential cmake ninja-build
+```
+
+#### Arch Linux
+```bash
+sudo pacman -S arm-none-eabi-gcc arm-none-eabi-newlib cmake ninja make
+```
+
+#### macOS (Homebrew)
+> [!NOTE]
+> Install the official Arm GNU Toolchain cask (`gcc-arm-embedded`) rather than the bare `arm-none-eabi-gcc` formula, as the formula lacks Newlib (`libc` / `libg`) and will cause linker errors (`cannot find -lc`).
+
+```bash
+# Remove bare Homebrew formulas if previously installed
+brew uninstall arm-none-eabi-gcc arm-none-eabi-binutils
+
+# Install official Arm toolchain cask & build tools
+brew install --cask gcc-arm-embedded
+brew install cmake ninja
+```
+
 ### Build Instructions
 
 ```bash
 mkdir build_firmware && cd build_firmware
 cmake -DPICO_PLATFORM=rp2350 ../firmware
-make -j$(nproc)
+make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 ```
+
+> [!TIP]
+> To clean and re-configure `build_firmware` without re-downloading the Pico SDK (`_deps` folder), preserve `_deps`:
+> ```bash
+> find build_firmware -mindepth 1 ! -path 'build_firmware/_deps*' -delete
+> ```
 
 Flash `lugalchess_firmware.uf2` by dropping it onto the RP2350 BOOTSEL volume.
 

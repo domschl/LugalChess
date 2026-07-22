@@ -515,27 +515,35 @@ void st7735_draw_status(const Position *pos, int level, int side, int current_de
     st7735_draw_rect(0, 128, 128, 32, ST7735_BLACK);
     st7735_draw_rect(0, 127, 128, 1, ST7735_GRAY);
 
-    // 2. Line 1 (y: 131): "Lvl:time/mm Side score"
-    char score_str[12];
-    int w_score = score;
-
-    if (w_score > MATE_VALUE - 100) {
-        int plies = INFINITY_VALUE - w_score;
-        int moves = (plies + 1) / 2;
-        snprintf(score_str, sizeof(score_str), "+M%d", moves);
-    } else if (w_score < -MATE_VALUE + 100) {
-        int plies = INFINITY_VALUE + w_score;
-        int moves = (plies + 1) / 2;
-        snprintf(score_str, sizeof(score_str), "-M%d", moves);
-    } else {
-        snprintf(score_str, sizeof(score_str), "%s%.2f", (w_score >= 0) ? "+" : "", w_score / 100.0);
-    }
-
     const char *time_str_tbl[8] = { "1s", "2s", "5s", "10s", "15s", "30s", "60s", "Inf" };
     const char *lvl_str = (level >= 1 && level <= 8) ? time_str_tbl[level - 1] : "1s";
 
+    const char *book_name = get_book_line_name(pos);
+
     char line1_buf[24];
-    snprintf(line1_buf, sizeof(line1_buf), "Lvl:%s/%02d %s %s", lvl_str, current_depth, (side == WHITE) ? "W" : "B", score_str);
+    if (book_name != NULL && strlen(book_name) > 0) {
+        snprintf(line1_buf, sizeof(line1_buf), "Lvl:%s %s %s", lvl_str, book_name, (side == WHITE) ? "W" : "B");
+    } else if (current_depth > 0) {
+        char score_str[12];
+        int w_score = score;
+
+        if (w_score > MATE_VALUE - 100) {
+            int plies = INFINITY_VALUE - w_score;
+            int moves = (plies + 1) / 2;
+            snprintf(score_str, sizeof(score_str), "+M%d", moves);
+        } else if (w_score < -MATE_VALUE + 100) {
+            int plies = INFINITY_VALUE + w_score;
+            int moves = (plies + 1) / 2;
+            snprintf(score_str, sizeof(score_str), "-M%d", moves);
+        } else {
+            snprintf(score_str, sizeof(score_str), "%s%.2f", (w_score >= 0) ? "+" : "", w_score / 100.0);
+        }
+
+        snprintf(line1_buf, sizeof(line1_buf), "Lvl:%s/%02d %s %s", lvl_str, current_depth, (side == WHITE) ? "W" : "B", score_str);
+    } else {
+        snprintf(line1_buf, sizeof(line1_buf), "Lvl:%s %s", lvl_str, (side == WHITE) ? "W" : "B");
+    }
+
     st7735_draw_string(2, 131, line1_buf, ST7735_YELLOW, 1);
 
     // 3. Line 2 (y: 145): PV line or last move + comment

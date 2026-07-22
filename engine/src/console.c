@@ -46,6 +46,13 @@ static void format_move_str(Move move, char *move_str) {
 static void sync_moves_from_history(const Position *pos);
 #endif
 
+#if !defined(__arm__) && !defined(PICO_BOARD)
+static void reset_game_search_state(void) {
+    has_last_search_score = false;
+    last_search_score_white = 0;
+}
+#endif
+
 #if defined(__arm__) || defined(PICO_BOARD)
 #include "pico/stdlib.h"
 #include "hardware/flash.h"
@@ -66,6 +73,15 @@ static uint32_t last_thinking_board_update_ms = 0;
 static Move current_search_best_move = 0;
 static int current_search_score = 0;
 static int current_search_depth = 0;
+
+static void reset_game_search_state(void) {
+    has_last_search_score = false;
+    last_search_score_white = 0;
+    current_search_depth = 0;
+    last_player_move[0] = '\0';
+    last_engine_move[0] = '\0';
+    strcpy(game_status_msg, "");
+}
 
 typedef enum {
     MODE_NORMAL,
@@ -1025,6 +1041,7 @@ void console_loop(void) {
 #if defined(__arm__) || defined(PICO_BOARD)
     current_pos_ptr = &pos;
 #endif
+    reset_game_search_state();
     parse_fen(&pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
 
     printf("=========================================\n");
@@ -1072,9 +1089,11 @@ void console_loop(void) {
         else if (strcmp(line, "ucinewgame") == 0) {
             is_uci_client_mode = true;
             clear_tt();
+            reset_game_search_state();
         }
         else if (strncmp(line, "position", 8) == 0) {
             is_uci_client_mode = true;
+            reset_game_search_state();
             char *ptr = line + 8;
             while (*ptr == ' ') ptr++;
 
@@ -1122,12 +1141,12 @@ void console_loop(void) {
         else if (strcmp(line, "new") == 0 || strcmp(line, "ucinewgame") == 0) {
             parse_fen(&pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
             clear_tt();
+            reset_game_search_state();
             if (!is_uci_client_mode) {
                 printf("New game started.\n");
                 print_board(&pos);
             }
 #if defined(__arm__) || defined(PICO_BOARD)
-            strcpy(game_status_msg, "");
             display_show_moves = true;
             sync_moves_from_history(&pos);
             update_tm1638_display();

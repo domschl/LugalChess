@@ -8,6 +8,9 @@ project(lugalchess_firmware C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 14)
 
+# Ensure output executables have .elf extension for picotool conversion
+set(CMAKE_EXECUTABLE_SUFFIX ".elf")
+
 # Initialize Pico SDK
 pico_sdk_init()
 

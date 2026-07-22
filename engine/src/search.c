@@ -25,27 +25,77 @@ static Move killer_moves[2][MAX_PLYS]; // [killer_index][ply]
 // Approximate piece values for MVV-LVA sorting
 static const int sorting_values[6] = { 100, 300, 300, 500, 900, 10000 };
 
-static const char *book_lines[] = {
+typedef struct {
+    const char *name;
+    const char *moves;
+} BookEntry;
+
+static const BookEntry book_entries[] = {
     // 1. e4 lines
-    "e2e4 e7e5 g1f3 b8c6 f1b5 a7a6 b5a4 g8f6 e1g1 f8e7", // Ruy Lopez
-    "e2e4 e7e5 g1f3 b8c6 f1c4 f8c5 c2c3 g8f6 d2d4", // Italian
-    "e2e4 c7c5 g1f3 d7d6 d2d4 c5d4 f3d4 g8f6 b1c3 a7a6", // Sicilian Najdorf
-    "e2e4 c7c5 g1f3 e7e6 d2d4 c5d4 f3d4 b8c6 b1c3 d7d6", // Sicilian Taimanov
-    "e2e4 c7c5 c2c3 d7d5 e4d5 d8d5 d2d4 g8f6", // Sicilian Alapin
-    "e2e4 e7e6 d2d4 d7d5 b1c3 g8f6 c1g5 f8e7", // French Classical
-    "e2e4 c7c6 d2d4 d7d5 b1c3 d5e4 c3e4 c8f5", // Caro-Kann
-    "e2e4 d7d6 d2d4 g8f6 b1c3 g7g6 f2f4 f8g7", // Pirc
+    { "Ruy Lopez",        "e2e4 e7e5 g1f3 b8c6 f1b5 a7a6 b5a4 g8f6 e1g1 f8e7" },
+    { "Italian",          "e2e4 e7e5 g1f3 b8c6 f1c4 f8c5 c2c3 g8f6 d2d4" },
+    { "Sicil Najdorf",    "e2e4 c7c5 g1f3 d7d6 d2d4 c5d4 f3d4 g8f6 b1c3 a7a6" },
+    { "Sicil Taimanov",   "e2e4 c7c5 g1f3 e7e6 d2d4 c5d4 f3d4 b8c6 b1c3 d7d6" },
+    { "Sicil Alapin",     "e2e4 c7c5 c2c3 d7d5 e4d5 d8d5 d2d4 g8f6" },
+    { "French Class.",   "e2e4 e7e6 d2d4 d7d5 b1c3 g8f6 c1g5 f8e7" },
+    { "Caro-Kann",        "e2e4 c7c6 d2d4 d7d5 b1c3 d5e4 c3e4 c8f5" },
+    { "Pirc Def.",        "e2e4 d7d6 d2d4 g8f6 b1c3 g7g6 f2f4 f8g7" },
     // 2. d4 lines
-    "d2d4 d7d5 c2c4 e7e6 b1c3 g8f6 c1g5 f8e7", // QGD
-    "d2d4 d7d5 c2c4 c7c6 g1f3 g8f6 b1c3 e7e6", // Slav
-    "d2d4 g8f6 c2c4 g7g6 b1c3 f8g7 e4e5 d6d6", // King's Indian
-    "d2d4 g8f6 c2c4 e7e6 g1f3 b7b6 g2g3 c8b7", // Queen's Indian
-    "d2d4 g8f6 c2c4 e7e6 b1c3 f8b4 e2e3 e1g1", // Nimzo-Indian
+    { "QGD",              "d2d4 d7d5 c2c4 e7e6 b1c3 g8f6 c1g5 f8e7" },
+    { "Slav Def.",        "d2d4 d7d5 c2c4 c7c6 g1f3 g8f6 b1c3 e7e6" },
+    { "King's Indian",   "d2d4 g8f6 c2c4 g7g6 b1c3 f8g7 e4e5 d6d6" },
+    { "Queen's Indian",  "d2d4 g8f6 c2c4 e7e6 g1f3 b7b6 g2g3 c8b7" },
+    { "Nimzo-Indian",    "d2d4 g8f6 c2c4 e7e6 b1c3 f8b4 e2e3 e1g1" },
     // 3. Flank openings
-    "g1f3 d7d5 g2g3 g8f6 f1g2 c7c6 e1g1 c8f5", // KIA
-    "c2c4 e7e5 b1c3 g8f6 g1f3 b8c6 g2g3 f8b4", // English
-    "f2f4 d7d5 g1f3 g8f6 e2e3 c7c5 f1e2 b8c6" // Bird's
+    { "King's Ind Atk",   "g1f3 d7d5 g2g3 g8f6 f1g2 c7c6 e1g1 c8f5" },
+    { "English Op.",     "c2c4 e7e5 b1c3 g8f6 g1f3 b8c6 g2g3 f8b4" },
+    { "Bird's Op.",      "f2f4 d7d5 g1f3 g8f6 e2e3 c7c5 f1e2 b8c6" }
 };
+
+const char *get_book_line_name(const Position *pos) {
+    if (pos == NULL || pos->history_ply == 0) {
+        return NULL;
+    }
+
+    char history_str[512] = "";
+    int offset = 0;
+    for (int i = 0; i < pos->history_ply; i++) {
+        Move m = pos->history[i].move;
+        int from = MOVE_FROM(m);
+        int to = MOVE_TO(m);
+        char m_str[6];
+        m_str[0] = 'a' + (from % 8);
+        m_str[1] = '1' + (from / 8);
+        m_str[2] = 'a' + (to % 8);
+        m_str[3] = '1' + (to / 8);
+        m_str[4] = '\0';
+        if (move_is_promo(m)) {
+            int promo = move_promo_piece(m);
+            const char promo_chars[] = "pnbrqk";
+            m_str[4] = promo_chars[promo];
+            m_str[5] = '\0';
+        }
+        
+        int len = snprintf(history_str + offset, sizeof(history_str) - offset, "%s%s", i > 0 ? " " : "", m_str);
+        if (len < 0 || offset + len >= (int)sizeof(history_str)) {
+            return NULL;
+        }
+        offset += len;
+    }
+
+    int history_len = strlen(history_str);
+    if (history_len == 0) return NULL;
+
+    int book_size = sizeof(book_entries) / sizeof(book_entries[0]);
+    for (int i = 0; i < book_size; i++) {
+        const char *line = book_entries[i].moves;
+        if (strncmp(line, history_str, history_len) == 0 && (line[history_len] == ' ' || line[history_len] == '\0')) {
+            return book_entries[i].name;
+        }
+    }
+
+    return NULL;
+}
 
 static Move get_book_move(Position *pos) {
     char history_str[512] = "";
@@ -78,9 +128,9 @@ static Move get_book_move(Position *pos) {
     int candidate_count = 0;
     int history_len = strlen(history_str);
 
-    int book_size = sizeof(book_lines) / sizeof(book_lines[0]);
+    int book_size = sizeof(book_entries) / sizeof(book_entries[0]);
     for (int i = 0; i < book_size; i++) {
-        const char *line = book_lines[i];
+        const char *line = book_entries[i].moves;
         if (history_len == 0) {
             candidates[candidate_count++] = line;
         } else {
