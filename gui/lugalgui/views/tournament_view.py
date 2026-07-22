@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from lugalgui.models.elo_rating import EngineEloStats
+from lugalgui.models.elo_rating import EloRatingCalculator, EngineEloStats
 from lugalgui.models.engine_registry import EngineInfo, EngineRegistry
 from lugalgui.models.tournament_manager import TournamentManager
 from lugalgui.views.board_widget import ChessBoardWidget
@@ -210,6 +210,7 @@ class TournamentView(QWidget):
             self.tab_widget.setCurrentIndex(1)  # Switch to Live Match tab
             self.progress_bar.setRange(0, len(pairings))
             self.progress_bar.setValue(0)
+            self._render_cross_table_matrix()
 
     def closeEvent(self, event: Any) -> None:
         """Ensure running tournament worker thread stops on window close."""
@@ -266,6 +267,9 @@ class TournamentView(QWidget):
         txt = self.live_pgn_edit.toPlainText() + f" {res_label}\n"
         self.live_pgn_edit.setPlainText(txt)
 
+        # Update cross-table matrix in real-time during ongoing tournament
+        self._render_cross_table_matrix()
+
     @Slot(list, dict)
     def on_tournament_finished(self, pgn_list: list, elo_stats: dict[str, EngineEloStats]) -> None:
         """Called when all tournament games complete."""
@@ -275,23 +279,107 @@ class TournamentView(QWidget):
         self.saved_pgn_text = "\n\n".join(pgn_list)
         self.status_game_label.setText("Tournament Complete! Standings updated.")
 
-        # Update Standings Table sorted by Points then ELO
-        sorted_stats = sorted(elo_stats.values(), key=lambda s: (s.points, s.elo), reverse=True)
-        self.table_standings.setRowCount(len(sorted_stats))
-
-        for rank, s in enumerate(sorted_stats, start=1):
-            self.table_standings.setItem(rank - 1, 0, QTableWidgetItem(str(rank)))
-            self.table_standings.setItem(rank - 1, 1, QTableWidgetItem(s.name))
-            self.table_standings.setItem(rank - 1, 2, QTableWidgetItem(f"{s.points:.1f}"))
-            self.table_standings.setItem(rank - 1, 3, QTableWidgetItem(str(s.games_played)))
-            self.table_standings.setItem(rank - 1, 4, QTableWidgetItem(str(s.wins)))
-            self.table_standings.setItem(rank - 1, 5, QTableWidgetItem(str(s.draws)))
-            self.table_standings.setItem(rank - 1, 6, QTableWidgetItem(str(s.losses)))
-            self.table_standings.setItem(rank - 1, 7, QTableWidgetItem(f"{s.score_percentage:.1f}%"))
-            self.table_standings.setItem(rank - 1, 8, QTableWidgetItem(f"{s.elo:.1f}"))
-            self.table_standings.setItem(rank - 1, 9, QTableWidgetItem(f"±{s.error:.1f}"))
-
+        # Update final Cross-Table Matrix Standings
+        self._render_cross_table_matrix()
         self.tab_widget.setCurrentIndex(2)  # Switch to ELO Standings tab
+
+    def _render_cross_table_matrix(self) -> None:
+        """Render standard tournament N x N cross-table matrix with cumulative stats & ELO ratings."""
+        worker = self.tournament_manager.worker
+        if not worker:
+            return
+
+        participant_names = list({e.name for pair in worker.pairing_schedule for e in pair})
+        match_results = list(worker.results)  # list of (white_name, black_name, score)
+
+        if not participant_names:
+            return
+
+        # Compute live ratings & W-D-L stats
+        elo_stats = EloRatingCalculator.calculate_ratings(participant_names, match_results)
+        sorted_stats = sorted(elo_stats.values(), key=lambda s: (s.points, s.elo), reverse=True)
+        sorted_names = [s.name for s in sorted_stats]
+
+        # Build head-to-head match matrix: h2h[white_name][black_name] -> list of score strings
+        h2h: dict[str, dict[str, list[str]]] = {n1: {n2: [] for n2 in participant_names} for n1 in participant_names}
+        for w_name, b_name, score in match_results:
+            w_score_str = "1" if score == 1.0 else ("0" if score == 0.0 else "½")
+            b_score_str = "0" if score == 1.0 else ("1" if score == 0.0 else "½")
+            h2h[w_name][b_name].append(w_score_str)
+            h2h[b_name][w_name].append(b_score_str)
+
+        num_participants = len(sorted_names)
+
+        # Columns: Rank, Engine, 1, 2, ..., N, Pts, W-D-L, Score %, ELO, ± Error
+        headers = ["Rank", "Engine"] + [str(i + 1) for i in range(num_participants)] + ["Pts", "W-D-L", "Score %", "ELO", "± Error"]
+        self.table_standings.setColumnCount(len(headers))
+        self.table_standings.setHorizontalHeaderLabels(headers)
+        self.table_standings.setRowCount(num_participants)
+
+        # Style headers
+        header_view = self.table_standings.horizontalHeader()
+        header_view.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header_view.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        for c in range(2, len(headers)):
+            header_view.setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
+
+        for row_idx, s in enumerate(sorted_stats):
+            engine_name = s.name
+            rank_num = row_idx + 1
+
+            # 0: Rank
+            item_rank = QTableWidgetItem(str(rank_num))
+            item_rank.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table_standings.setItem(row_idx, 0, item_rank)
+
+            # 1: Engine Name
+            item_name = QTableWidgetItem(engine_name)
+            self.table_standings.setItem(row_idx, 1, item_name)
+
+            # 2 .. 2 + N - 1: N x N Matrix Cells
+            for col_idx, opp_name in enumerate(sorted_names):
+                cell_col = 2 + col_idx
+                if engine_name == opp_name:
+                    # Diagonal cell (X)
+                    item_diag = QTableWidgetItem("✕")
+                    item_diag.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    item_diag.setBackground(Qt.GlobalColor.darkGray)
+                    item_diag.setForeground(Qt.GlobalColor.white)
+                    self.table_standings.setItem(row_idx, cell_col, item_diag)
+                else:
+                    scores = h2h[engine_name][opp_name]
+                    cell_text = ", ".join(scores) if scores else "-"
+                    item_cell = QTableWidgetItem(cell_text)
+                    item_cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    self.table_standings.setItem(row_idx, cell_col, item_cell)
+
+            # Cumulative Columns
+            base_col = 2 + num_participants
+
+            # Pts
+            item_pts = QTableWidgetItem(f"{s.points:.1f}")
+            item_pts.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table_standings.setItem(row_idx, base_col, item_pts)
+
+            # W-D-L
+            item_wdl = QTableWidgetItem(f"{s.wins}-{s.draws}-{s.losses}")
+            item_wdl.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table_standings.setItem(row_idx, base_col + 1, item_wdl)
+
+            # Score %
+            item_pct = QTableWidgetItem(f"{s.score_percentage:.1f}%")
+            item_pct.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table_standings.setItem(row_idx, base_col + 2, item_pct)
+
+            # ELO
+            item_elo = QTableWidgetItem(f"{s.elo:.1f}")
+            item_elo.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table_standings.setItem(row_idx, base_col + 3, item_elo)
+
+            # ± Error
+            item_err = QTableWidgetItem(f"±{s.error:.1f}")
+            item_err.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table_standings.setItem(row_idx, base_col + 4, item_err)
 
     @Slot()
     def on_export_pgn(self) -> None:
