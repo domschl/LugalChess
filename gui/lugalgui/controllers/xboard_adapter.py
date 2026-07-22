@@ -132,9 +132,12 @@ class XBoardAdapter(QObject):
         sec = max(1, time_limit_ms // 1000)
         self._send_xboard_cmd("force")
 
-        if self._pending_fen and self.supports_setboard:
-            self._send_xboard_cmd(f"setboard {self._pending_fen}")
+        current_fen = self._pending_fen or self.current_board.fen()
+        if self.supports_setboard:
+            self._send_xboard_cmd(f"setboard {current_fen}")
         else:
+            self._send_xboard_cmd("new")
+            self._send_xboard_cmd("force")
             for m in self._pending_moves:
                 self._send_xboard_cmd(m)
 
@@ -148,9 +151,13 @@ class XBoardAdapter(QObject):
             return
 
         self._send_xboard_cmd("force")
-        if self._pending_fen and self.supports_setboard:
-            self._send_xboard_cmd(f"setboard {self._pending_fen}")
+
+        current_fen = self._pending_fen or self.current_board.fen()
+        if self.supports_setboard:
+            self._send_xboard_cmd(f"setboard {current_fen}")
         else:
+            self._send_xboard_cmd("new")
+            self._send_xboard_cmd("force")
             for m in self._pending_moves:
                 self._send_xboard_cmd(m)
 
