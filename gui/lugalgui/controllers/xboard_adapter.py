@@ -10,6 +10,7 @@ import subprocess
 import threading
 import time
 from typing import Any
+import chess
 from PySide6.QtCore import QObject, Signal
 
 
@@ -30,6 +31,7 @@ class XBoardAdapter(QObject):
         self.reader_thread: threading.Thread | None = None
         self._is_running: bool = False
         self.engine_name: str = "XBoard Engine"
+        self.current_board: chess.Board = chess.Board()
 
         # Features supported by engine
         self.supports_setboard: bool = False
@@ -107,6 +109,20 @@ class XBoardAdapter(QObject):
         """Translate UCI position command to XBoard setboard or move sequence."""
         self._pending_fen = fen
         self._pending_moves = moves or []
+        self.current_board = chess.Board(fen or chess.STARTING_FEN)
+        if moves:
+            for m in moves:
+                try:
+                    mv = chess.Move.from_uci(m)
+                    if mv in self.current_board.legal_moves:
+                        self.current_board.push(mv)
+                except ValueError:
+                    try:
+                        mv = self.current_board.parse_san(m)
+                        if mv in self.current_board.legal_moves:
+                            self.current_board.push(mv)
+                    except ValueError:
+                        pass
 
     def start_search_time(self, time_limit_ms: int) -> None:
         """Start XBoard engine search with time limit."""
@@ -119,7 +135,6 @@ class XBoardAdapter(QObject):
         if self._pending_fen and self.supports_setboard:
             self._send_xboard_cmd(f"setboard {self._pending_fen}")
         else:
-            self._send_xboard_cmd("new")
             for m in self._pending_moves:
                 self._send_xboard_cmd(m)
 
@@ -136,7 +151,6 @@ class XBoardAdapter(QObject):
         if self._pending_fen and self.supports_setboard:
             self._send_xboard_cmd(f"setboard {self._pending_fen}")
         else:
-            self._send_xboard_cmd("new")
             for m in self._pending_moves:
                 self._send_xboard_cmd(m)
 
@@ -177,14 +191,29 @@ class XBoardAdapter(QObject):
             if m:
                 self.engine_name = f"{m.group(1)} (XBoard Adapter)"
 
-        # 2. Engine move output: "move e2e4" or "My move is: e2e4"
-        elif line.startswith("move "):
-            move_str = line.split()[1]
-            self.best_move_found.emit(move_str, "")
-        elif "move is:" in line.lower():
+        # 2. Engine move output: "move c5" or "move e2e4" or "My move is: c5"
+        elif line.startswith("move ") or "move is:" in line.lower():
             parts = line.split()
-            move_str = parts[-1]
-            self.best_move_found.emit(move_str, "")
+            raw_move = parts[1] if line.startswith("move ") else parts[-1]
+            
+            uci_move = ""
+            try:
+                m_obj = chess.Move.from_uci(raw_move)
+                if m_obj in self.current_board.legal_moves:
+                    uci_move = m_obj.uci()
+            except ValueError:
+                pass
+
+            if not uci_move:
+                try:
+                    m_obj = self.current_board.parse_san(raw_move)
+                    if m_obj in self.current_board.legal_moves:
+                        uci_move = m_obj.uci()
+                except ValueError:
+                    uci_move = raw_move
+
+            if uci_move:
+                self.best_move_found.emit(uci_move, "")
 
         # 3. Thinking output line parsing (e.g. Crafty: " 12   +45   300   14500   e2e4 c7c5 g1f3")
         # Format: ply score_cp time_cs nodes pv...
@@ -202,8 +231,7 @@ class XBoardAdapter(QObject):
                         score_cp = int(score_str)
 
                 pv_moves = tokens[4:]
-                # Filter valid move tokens
-                valid_pv = [m for m in pv_moves if len(m) >= 4 and m[0].isalpha()]
+                valid_pv = [m for m in pv_moves if len(m) >= 2]
 
                 info_dict = {
                     "depth": depth,

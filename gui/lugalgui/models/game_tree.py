@@ -72,9 +72,15 @@ class GameTree:
         return False
 
     def push_uci_str(self, uci_str: str) -> bool:
-        """Parse and apply a move string in UCI format (e.g. 'e2e4')."""
+        """Parse and apply a move string in UCI format (e.g. 'e2e4') or SAN format (e.g. 'c5', 'Nf3')."""
         try:
             move = chess.Move.from_uci(uci_str)
+            return self.push_move(move)
+        except ValueError:
+            pass
+
+        try:
+            move = self.board.parse_san(uci_str)
             return self.push_move(move)
         except ValueError:
             return False
