@@ -266,8 +266,66 @@ int evaluate(const Position *pos) {
             if (b_home_minors >= 3) b_dev_score -= 30;
         }
 
+        // 4. Heavy Penalty for Trapped / Constipated Bishops blocked by own pawns
+        // White C1 Bishop trapped by BOTH B2 and D2 pawns
+        if (pos->board[C1] == BISHOP && (pos->color_bbs[WHITE] & (1ULL << C1))) {
+            if ((pos->board[B2] == PAWN && (pos->color_bbs[WHITE] & (1ULL << B2))) &&
+                (pos->board[D2] == PAWN && (pos->color_bbs[WHITE] & (1ULL << D2)))) {
+                w_dev_score -= 50; // Trapped C1 bishop has 0 exit diagonals!
+            }
+        }
+        // White F1 Bishop trapped by BOTH E2 and G2 pawns
+        if (pos->board[F1] == BISHOP && (pos->color_bbs[WHITE] & (1ULL << F1))) {
+            if ((pos->board[E2] == PAWN && (pos->color_bbs[WHITE] & (1ULL << E2))) &&
+                (pos->board[G2] == PAWN && (pos->color_bbs[WHITE] & (1ULL << G2)))) {
+                w_dev_score -= 50; // Trapped F1 bishop has 0 exit diagonals!
+            }
+        }
+
+        // Black C8 Bishop trapped by BOTH B7 and D7 pawns
+        if (pos->board[C8] == BISHOP && (pos->color_bbs[BLACK] & (1ULL << C8))) {
+            if ((pos->board[B7] == PAWN && (pos->color_bbs[BLACK] & (1ULL << B7))) &&
+                (pos->board[D7] == PAWN && (pos->color_bbs[BLACK] & (1ULL << D7)))) {
+                b_dev_score -= 50; // Trapped C8 bishop has 0 exit diagonals!
+            }
+        }
+        // Black F8 Bishop trapped by BOTH E7 and G7 pawns
+        if (pos->board[F8] == BISHOP && (pos->color_bbs[BLACK] & (1ULL << F8))) {
+            if ((pos->board[E7] == PAWN && (pos->color_bbs[BLACK] & (1ULL << E7))) &&
+                (pos->board[G7] == PAWN && (pos->color_bbs[BLACK] & (1ULL << G7)))) {
+                b_dev_score -= 50; // Trapped F8 bishop has 0 exit diagonals!
+            }
+        }
+
         mg_score += w_dev_score;
         mg_score -= b_dev_score;
+    }
+
+    // 5. O(1) Bishop Mobility Evaluation (reward open diagonals, penalize trapped bishops anywhere)
+    bb = w_bishops;
+    while (bb) {
+        int sq = pop_lsb(&bb);
+        uint64_t attacks = get_bishop_attacks(sq, pos->color_bbs[WHITE] | pos->color_bbs[BLACK]);
+        attacks &= ~pos->color_bbs[WHITE]; // non-friendly squares
+        int mob = count_bits(attacks);
+        if (mob <= 2) {
+            mg_score -= (3 - mob) * 15; // Penalty for restricted/trapped bishop
+        } else {
+            mg_score += (mob - 2) * 5;  // Reward active bishop mobility
+        }
+    }
+
+    bb = b_bishops;
+    while (bb) {
+        int sq = pop_lsb(&bb);
+        uint64_t attacks = get_bishop_attacks(sq, pos->color_bbs[WHITE] | pos->color_bbs[BLACK]);
+        attacks &= ~pos->color_bbs[BLACK]; // non-friendly squares
+        int mob = count_bits(attacks);
+        if (mob <= 2) {
+            mg_score += (3 - mob) * 15; // Penalty for Black's restricted bishop
+        } else {
+            mg_score -= (mob - 2) * 5;  // Reward Black's active bishop mobility
+        }
     }
 
     // Tapered evaluation interpolation
