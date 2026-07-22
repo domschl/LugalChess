@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from lugalgui.controllers.uci_controller import UCIController
+from lugalgui.controllers.xboard_adapter import XBoardAdapter
 from lugalgui.models.engine_registry import EngineRegistry
 from lugalgui.views.board_widget import ChessBoardWidget
 
@@ -181,10 +182,19 @@ class AuxBoardWidget(QWidget):
             self.pv_edit.setPlainText("PV: -")
 
     def _init_dedicated_controller(self, eng_path: str) -> None:
-        """Initialize dedicated background UCI engine instance."""
+        """Initialize dedicated background UCI engine instance (supports XBoard via XBoardAdapter)."""
         self._stop_dedicated_controller()
-        self.dedicated_controller = UCIController(self)
-        self.dedicated_controller.engine_path = eng_path
+        eng_info = self.engine_registry.get_engine_by_path(eng_path) if self.engine_registry else None
+        
+        if eng_info and eng_info.is_xboard:
+            self.dedicated_controller = XBoardAdapter(eng_path, args=eng_info.args, parent=self)
+        else:
+            uci_ctrl = UCIController(self)
+            uci_ctrl.engine_path = eng_path
+            if eng_info:
+                uci_ctrl.engine_args = eng_info.args
+            self.dedicated_controller = uci_ctrl
+
         self.dedicated_controller.search_progress.connect(self.on_dedicated_progress)
         self.dedicated_controller.start_engine()
 

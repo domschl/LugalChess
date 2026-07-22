@@ -20,6 +20,7 @@ class UCIController(QObject):
     def __init__(self, engine_path: str | None = None, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self.engine_path: str | None = engine_path
+        self.engine_args: list[str] = []
         self.process: subprocess.Popen[str] | None = None
         self.reader_thread: threading.Thread | None = None
         self._is_running: bool = False
@@ -38,9 +39,10 @@ class UCIController(QObject):
 
         self.stop_engine()
 
+        cmd = [self.engine_path] + self.engine_args
         try:
             self.process = subprocess.Popen(
-                [self.engine_path],
+                cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 
 from lugalgui.controllers.rp2350_controller import RP2350Controller
 from lugalgui.controllers.uci_controller import UCIController
+from lugalgui.controllers.xboard_adapter import XBoardAdapter
 from lugalgui.models.engine_registry import EngineRegistry
 from lugalgui.models.game_tree import GameTree
 from lugalgui.views.aux_board_widget import AuxBoardWidget
@@ -424,12 +425,37 @@ class MainWindow(QMainWindow):
 
     @Slot(int)
     def on_engine_target_changed(self, index: int) -> None:
-        """Handle engine target dropdown selection change."""
+        """Handle engine target dropdown selection change (supports XBoard via XBoardAdapter)."""
         if not self._is_rp2350_selected():
             eng_path = self.engine_target_combo.currentData()
-            if eng_path and isinstance(eng_path, str) and eng_path != self.uci_controller.engine_path:
-                self.uci_controller.engine_path = eng_path
-                self.uci_controller.start_engine()
+            if eng_path and isinstance(eng_path, str):
+                eng_info = self.engine_registry.get_engine_by_path(eng_path)
+                args = eng_info.args if eng_info else []
+                is_xb = eng_info.is_xboard if eng_info else False
+                
+                needs_new_ctrl = False
+                if is_xb and not isinstance(self.uci_controller, XBoardAdapter):
+                    needs_new_ctrl = True
+                elif not is_xb and isinstance(self.uci_controller, XBoardAdapter):
+                    needs_new_ctrl = True
+                elif eng_path != self.uci_controller.engine_path or args != self.uci_controller.engine_args:
+                    needs_new_ctrl = True
+
+                if needs_new_ctrl:
+                    self.uci_controller.stop_engine()
+                    if is_xb:
+                        self.uci_controller = XBoardAdapter(eng_path, args=args, parent=self)
+                    else:
+                        ctrl = UCIController(self)
+                        ctrl.engine_path = eng_path
+                        ctrl.engine_args = args
+                        self.uci_controller = ctrl
+
+                    self.uci_controller.search_progress.connect(self.on_search_progress)
+                    self.uci_controller.best_move_found.connect(self.on_best_move_found)
+                    self.uci_controller.engine_started.connect(self.on_engine_started)
+                    self.uci_controller.log_received.connect(self.on_engine_log_line)
+                    self.uci_controller.start_engine()
 
     def _populate_engine_target_combo(self) -> None:
         """Populate main engine target combo box from EngineRegistry."""
