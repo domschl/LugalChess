@@ -219,6 +219,57 @@ int evaluate(const Position *pos) {
     mg_score += white_castling_bonus;
     mg_score -= black_castling_bonus;
 
+    // Opening Piece Development & Unblocking Evaluation (Middlegame phase >= 12)
+    if (phase >= 12) {
+        int w_dev_score = 0;
+        int b_dev_score = 0;
+
+        // 1. Penalize minor pieces staying on home squares
+        if (pos->board[B1] == KNIGHT && (pos->color_bbs[WHITE] & (1ULL << B1))) w_dev_score -= 25;
+        if (pos->board[G1] == KNIGHT && (pos->color_bbs[WHITE] & (1ULL << G1))) w_dev_score -= 25;
+        if (pos->board[C1] == BISHOP && (pos->color_bbs[WHITE] & (1ULL << C1))) w_dev_score -= 25;
+        if (pos->board[F1] == BISHOP && (pos->color_bbs[WHITE] & (1ULL << F1))) w_dev_score -= 25;
+
+        if (pos->board[B8] == KNIGHT && (pos->color_bbs[BLACK] & (1ULL << B8))) b_dev_score -= 25;
+        if (pos->board[G8] == KNIGHT && (pos->color_bbs[BLACK] & (1ULL << G8))) b_dev_score -= 25;
+        if (pos->board[C8] == BISHOP && (pos->color_bbs[BLACK] & (1ULL << C8))) b_dev_score -= 25;
+        if (pos->board[F8] == BISHOP && (pos->color_bbs[BLACK] & (1ULL << F8))) b_dev_score -= 25;
+
+        // 2. Penalize unmoved or blocked central pawns on d2/e2 (White) and d7/e7 (Black)
+        if (pos->board[D2] == PAWN && (pos->color_bbs[WHITE] & (1ULL << D2))) {
+            w_dev_score -= 15;
+            if (pos->color_bbs[WHITE] & (1ULL << D3)) w_dev_score -= 35; // Piece blocking d2 pawn
+        }
+        if (pos->board[E2] == PAWN && (pos->color_bbs[WHITE] & (1ULL << E2))) {
+            w_dev_score -= 15;
+            if (pos->color_bbs[WHITE] & (1ULL << E3)) w_dev_score -= 35; // Piece blocking e2 pawn
+        }
+
+        if (pos->board[D7] == PAWN && (pos->color_bbs[BLACK] & (1ULL << D7))) {
+            b_dev_score -= 15;
+            if (pos->color_bbs[BLACK] & (1ULL << D6)) b_dev_score -= 35; // Piece blocking d7 pawn
+        }
+        if (pos->board[E7] == PAWN && (pos->color_bbs[BLACK] & (1ULL << E7))) {
+            b_dev_score -= 15;
+            if (pos->color_bbs[BLACK] & (1ULL << E6)) b_dev_score -= 35; // Piece blocking e7 pawn
+        }
+
+        // 3. Penalize premature Queen outings before minor pieces are developed
+        if (pos->board[D1] != QUEEN || !(pos->color_bbs[WHITE] & (1ULL << D1))) {
+            int w_home_minors = (pos->board[B1] == KNIGHT) + (pos->board[G1] == KNIGHT) +
+                                (pos->board[C1] == BISHOP) + (pos->board[F1] == BISHOP);
+            if (w_home_minors >= 3) w_dev_score -= 30;
+        }
+        if (pos->board[D8] != QUEEN || !(pos->color_bbs[BLACK] & (1ULL << D8))) {
+            int b_home_minors = (pos->board[B8] == KNIGHT) + (pos->board[G8] == KNIGHT) +
+                                (pos->board[C8] == BISHOP) + (pos->board[F8] == BISHOP);
+            if (b_home_minors >= 3) b_dev_score -= 30;
+        }
+
+        mg_score += w_dev_score;
+        mg_score -= b_dev_score;
+    }
+
     // Tapered evaluation interpolation
     int score = ((mg_score * phase) + (eg_score * (24 - phase))) / 24;
 
