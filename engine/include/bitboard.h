@@ -14,6 +14,7 @@
         return __builtin_popcountll(bb);
     }
     static inline int get_lsb(uint64_t bb) {
+        if (bb == 0) return NO_SQ;
         return __builtin_ctzll(bb);
     }
 #elif defined(_MSC_VER)
@@ -22,6 +23,7 @@
         return (int)__popcnt64(bb);
     }
     static inline int get_lsb(uint64_t bb) {
+        if (bb == 0) return NO_SQ;
         unsigned long index;
         _BitScanForward64(&index, bb);
         return (int)index;

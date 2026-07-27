@@ -109,7 +109,15 @@ void uci_loop(void) {
                 while (fen_len > 0 && fen[fen_len - 1] == ' ') fen_len--;
                 fen[fen_len] = '\0';
                 
-                parse_fen(&pos, fen);
+                Position temp_pos;
+                parse_fen(&temp_pos, fen);
+                if (is_position_valid(&temp_pos)) {
+                    pos = temp_pos;
+                    clear_tt();
+                } else {
+                    printf("info string Error: Invalid FEN position\n");
+                    fflush(stdout);
+                }
             }
 
             // Parse subsequent moves if present

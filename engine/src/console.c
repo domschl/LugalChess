@@ -1187,13 +1187,20 @@ void console_loop(void) {
                 generate_fen(&pos, fen_buf);
                 printf("Current FEN: %s\n", fen_buf);
             } else {
-                parse_fen(&pos, fen_str);
-                max_history_ply = pos.history_ply;
-                printf("Position loaded.\n");
-                print_board(&pos);
+                Position temp_pos;
+                parse_fen(&temp_pos, fen_str);
+                if (!is_position_valid(&temp_pos)) {
+                    printf("Error: Invalid FEN position (must have exactly 1 White king, 1 Black king, and valid check state).\n");
+                } else {
+                    pos = temp_pos;
+                    clear_tt();
+                    max_history_ply = pos.history_ply;
+                    printf("Position loaded.\n");
+                    print_board(&pos);
 #if defined(__arm__) || defined(PICO_BOARD)
-                sync_moves_from_history(&pos);
+                    sync_moves_from_history(&pos);
 #endif
+                }
             }
         } 
         else if (strcmp(line, "save") == 0) {

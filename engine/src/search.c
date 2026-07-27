@@ -225,18 +225,6 @@ static void check_up_time(void) {
     }
 }
 
-// Convert mate scores to/from transposition table representation
-static inline int score_to_tt(int score, int ply) {
-    if (score > MATE_VALUE) return score + ply;
-    if (score < -MATE_VALUE) return score - ply;
-    return score;
-}
-
-static inline int score_from_tt(int score, int ply) {
-    if (score > MATE_VALUE) return score - ply;
-    if (score < -MATE_VALUE) return score + ply;
-    return score;
-}
 
 // MVV-LVA capture scoring helper
 static int score_capture(const Position *pos, Move move) {
@@ -372,11 +360,18 @@ int pv_search(Position *pos, int depth, int ply, int alpha, int beta, bool null_
     if (alpha >= mate_val) return alpha;
     if (beta <= -mate_val) return beta;
 
-    // TT Lookup
+    // TT Lookup (only apply score cutoffs at non-root plies)
     Move tt_move = 0;
     int tt_score = 0;
-    if (read_tt(pos->hash_key, depth, alpha, beta, &tt_score, &tt_move)) {
-        return score_from_tt(tt_score, ply);
+    if (read_tt(pos->hash_key, depth, ply, alpha, beta, &tt_score, &tt_move)) {
+        if (ply > 0) {
+            return tt_score;
+        }
+    }
+
+    int in_check = is_square_attacked(pos, get_lsb(pos->piece_bbs[KING] & pos->color_bbs[pos->side]), pos->side ^ 1);
+    if (in_check) {
+        depth++; // Check extension: extend search when in check
     }
 
     // Leaf nodes
@@ -384,13 +379,9 @@ int pv_search(Position *pos, int depth, int ply, int alpha, int beta, bool null_
         return quiescence(pos, alpha, beta);
     }
 
-    int in_check = is_square_attacked(pos, get_lsb(pos->piece_bbs[KING] & pos->color_bbs[pos->side]), pos->side ^ 1);
-    if (in_check) {
-        depth++; // Check extension
-    }
-
     // Null Move Pruning (NMP)
-    if (null_move_allowed && !in_check && depth >= 3) {
+    int total_pieces = count_bits(pos->color_bbs[WHITE] | pos->color_bbs[BLACK]);
+    if (null_move_allowed && !in_check && depth >= 3 && total_pieces > 4) {
         // Verify we have major pieces left (avoid zugzwang)
         uint64_t majors = pos->piece_bbs[KNIGHT] | pos->piece_bbs[BISHOP] | pos->piece_bbs[ROOK] | pos->piece_bbs[QUEEN];
         if (majors & pos->color_bbs[pos->side]) {
@@ -428,7 +419,7 @@ int pv_search(Position *pos, int depth, int ply, int alpha, int beta, bool null_
             score = -pv_search(pos, depth - 1, ply + 1, -beta, -alpha, true);
         } else {
             // Quiet moves LMR (Late Move Reduction)
-            if (depth >= 3 && !in_check && !move_is_capture(move) && !move_is_promo(move) && legal_moves > 4) {
+            if (depth >= 3 && !in_check && !move_is_capture(move) && !move_is_promo(move) && legal_moves > 4 && total_pieces > 4) {
                 // Reduce depth
                 score = -pv_search(pos, depth - 2, ply + 1, -alpha - 1, -alpha, true);
                 if (score > alpha) {
@@ -501,6 +492,12 @@ int pv_search(Position *pos, int depth, int ply, int alpha, int beta, bool null_
 
 // Iterative deepening entry point
 void search_position(Position *pos, int depth, int time_limit_ms) {
+    if (!is_position_valid(pos)) {
+        printf("info string Error: Invalid position\n");
+        fflush(stdout);
+        return;
+    }
+
     // Check if there is an opening book move
     Move book_move = get_book_move(pos);
     if (book_move != 0) {
@@ -571,7 +568,7 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
 
         Move temp_move = 0;
         int temp_score = 0;
-        if (read_tt(pos->hash_key, d, -INFINITY_VALUE, INFINITY_VALUE, &temp_score, &temp_move) && temp_move != 0) {
+        if (read_tt(pos->hash_key, d, 0, -INFINITY_VALUE, INFINITY_VALUE, &temp_score, &temp_move) && temp_move != 0) {
             completed_best_move = temp_move;
         } else {
             Move probe_move = 0;
@@ -590,9 +587,21 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
 
         double nps = time_spent > 0 ? (double)nodes_searched / ((double)time_spent / 1000.0) : 0.0;
 
-        // Print UCI info block
-        printf("info depth %d score cp %d nodes %ld nps %.0f time %ld pv ", 
-               d, completed_best_score, nodes_searched, nps, time_spent);
+        // Print UCI info block with proper mate score formatting
+        if (completed_best_score >= MATE_VALUE - 1000) {
+            int mate_plies = INFINITY_VALUE - completed_best_score;
+            int mate_moves = (mate_plies + 1) / 2;
+            printf("info depth %d score mate %d nodes %ld nps %.0f time %ld pv ", 
+                   d, mate_moves, nodes_searched, nps, time_spent);
+        } else if (completed_best_score <= -MATE_VALUE + 1000) {
+            int mate_plies = INFINITY_VALUE + completed_best_score;
+            int mate_moves = (mate_plies + 1) / 2;
+            printf("info depth %d score mate -%d nodes %ld nps %.0f time %ld pv ", 
+                   d, mate_moves, nodes_searched, nps, time_spent);
+        } else {
+            printf("info depth %d score cp %d nodes %ld nps %.0f time %ld pv ", 
+                   d, completed_best_score, nodes_searched, nps, time_spent);
+        }
         
         // Print Principal Variation (PV) path
         Position temp_pos = *pos;
@@ -615,13 +624,13 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
             
             // Look up next move in PV
             int dummy_score;
-            read_tt(temp_pos.hash_key, d - pv_ply, -INFINITY_VALUE, INFINITY_VALUE, &dummy_score, &pv_move);
+            read_tt(temp_pos.hash_key, d - pv_ply, pv_ply, -INFINITY_VALUE, INFINITY_VALUE, &dummy_score, &pv_move);
         }
         printf("\n");
         fflush(stdout);
 
         // If mate is detected (e.g. M1, M2, M3), stop calculating deeper levels!
-        if (completed_best_score >= MATE_VALUE - 100 || completed_best_score <= -MATE_VALUE + 100) {
+        if (completed_best_score >= MATE_VALUE - 1000 || completed_best_score <= -MATE_VALUE + 1000) {
             break;
         }
 

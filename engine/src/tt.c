@@ -53,7 +53,7 @@ void increment_tt_age(void) {
     tt_current_age++;
 }
 
-bool read_tt(uint64_t hash_key, int depth, int alpha, int beta, int *score, Move *best_move) {
+bool read_tt(uint64_t hash_key, int depth, int ply, int alpha, int beta, int *score, Move *best_move) {
     if (tt_table == NULL || tt_size_entries == 0) {
         return false;
     }
@@ -62,27 +62,27 @@ bool read_tt(uint64_t hash_key, int depth, int alpha, int beta, int *score, Move
     TTEntry *entry = &tt_table[idx];
 
     if (entry->hash_key == hash_key) {
-        *best_move = entry->best_move;
+        if (best_move) *best_move = entry->best_move;
 
         // Only use the score if the depth is sufficient
         if (entry->depth >= depth) {
-            int tt_score = entry->score;
+            int tt_score = score_from_tt((int)entry->score, ply);
 
             if (entry->flags == TT_EXACT) {
-                *score = tt_score;
+                if (score) *score = tt_score;
                 return true;
             }
             if (entry->flags == TT_ALPHA && tt_score <= alpha) {
-                *score = alpha;
+                if (score) *score = tt_score;
                 return true;
             }
             if (entry->flags == TT_BETA && tt_score >= beta) {
-                *score = beta;
+                if (score) *score = tt_score;
                 return true;
             }
         }
     } else {
-        *best_move = 0;
+        if (best_move) *best_move = 0;
     }
 
     return false;
@@ -98,7 +98,7 @@ bool probe_tt_entry(uint64_t hash_key, int *score, Move *best_move) {
 
     if (entry->hash_key == hash_key) {
         if (best_move) *best_move = entry->best_move;
-        if (score) *score = (int)entry->score;
+        if (score) *score = score_from_tt((int)entry->score, 0);
         return true;
     }
 

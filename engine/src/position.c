@@ -45,6 +45,8 @@ uint64_t generate_hash_key(const Position *pos) {
 
 // Check if a square is attacked by any piece of attacker_side
 bool is_square_attacked(const Position *pos, int square, int attacker_side) {
+    if (square < 0 || square >= 64) return false;
+
     // Pawn attacks
     int defender_side = attacker_side ^ 1;
     uint64_t pawns = pos->piece_bbs[PAWN] & pos->color_bbs[attacker_side];
@@ -70,17 +72,43 @@ bool is_square_attacked(const Position *pos, int square, int attacker_side) {
     return false;
 }
 
+// Validate whether a position meets standard chess rules
+bool is_position_valid(const Position *pos) {
+    if (pos == NULL) return false;
+    
+    // 1. Must have exactly 1 White King and 1 Black King
+    int w_kings = count_bits(pos->piece_bbs[KING] & pos->color_bbs[WHITE]);
+    int b_kings = count_bits(pos->piece_bbs[KING] & pos->color_bbs[BLACK]);
+    if (w_kings != 1 || b_kings != 1) return false;
+    
+    // 2. The side NOT to move cannot be in check (illegal board state)
+    int other_side = pos->side ^ 1;
+    int other_king_sq = get_lsb(pos->piece_bbs[KING] & pos->color_bbs[other_side]);
+    if (other_king_sq != NO_SQ && is_square_attacked(pos, other_king_sq, pos->side)) {
+        return false;
+    }
+    
+    return true;
+}
+
 // Parse FEN string and initialize board state
 void parse_fen(Position *pos, const char *fen) {
     memset(pos, 0, sizeof(Position));
     for (int sq = 0; sq < 64; sq++) pos->board[sq] = NO_PIECE;
+    
+    pos->en_passant = NO_SQ;
+    pos->side = WHITE;
+    pos->fullmove = 1;
+    pos->halfmove = 0;
+    
+    if (fen == NULL) return;
     
     int rank = 7;
     int file = 0;
     const char *char_ptr = fen;
     
     // 1. Parse piece placement
-    while (*char_ptr != ' ') {
+    while (*char_ptr != ' ' && *char_ptr != '\0') {
         if (*char_ptr == '/') {
             rank--;
             file = 0;
@@ -101,25 +129,36 @@ void parse_fen(Position *pos, const char *fen) {
             }
             
             if (piece != NO_PIECE) {
-                int sq = rank * 8 + file;
-                pos->board[sq] = piece;
-                set_bit(pos->piece_bbs[piece], sq);
-                set_bit(pos->color_bbs[color], sq);
+                if (rank >= 0 && rank < 8 && file >= 0 && file < 8) {
+                    int sq = rank * 8 + file;
+                    pos->board[sq] = piece;
+                    set_bit(pos->piece_bbs[piece], sq);
+                    set_bit(pos->color_bbs[color], sq);
+                }
             }
             file++;
         }
         char_ptr++;
     }
     
+    if (*char_ptr == '\0') {
+        pos->history_ply = 0;
+        pos->hash_key = generate_hash_key(pos);
+        return;
+    }
+    
     char_ptr++; // skip space
     
     // 2. Parse active color
-    pos->side = (*char_ptr == 'w') ? WHITE : BLACK;
-    char_ptr += 2; // skip color and space
+    if (*char_ptr != '\0') {
+        pos->side = (*char_ptr == 'w') ? WHITE : BLACK;
+        char_ptr++;
+        if (*char_ptr == ' ') char_ptr++;
+    }
     
     // 3. Parse castling rights
     pos->castling_rights = 0;
-    while (*char_ptr != ' ') {
+    while (*char_ptr != ' ' && *char_ptr != '\0') {
         switch (*char_ptr) {
             case 'K': pos->castling_rights |= WK_CASTLE; break;
             case 'Q': pos->castling_rights |= WQ_CASTLE; break;
@@ -130,13 +169,13 @@ void parse_fen(Position *pos, const char *fen) {
         char_ptr++;
     }
     
-    char_ptr++; // skip space
+    if (*char_ptr == ' ') char_ptr++;
     
     // 4. Parse en-passant square
     if (*char_ptr == '-') {
         pos->en_passant = NO_SQ;
         char_ptr++;
-    } else {
+    } else if (char_ptr[0] >= 'a' && char_ptr[0] <= 'h' && char_ptr[1] >= '1' && char_ptr[1] <= '8') {
         int f = char_ptr[0] - 'a';
         int r = char_ptr[1] - '1';
         pos->en_passant = r * 8 + f;

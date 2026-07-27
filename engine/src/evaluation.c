@@ -151,6 +151,38 @@ static const int eg_psqt[6][64] = {
     }
 };
 
+// Endgame Mop-up evaluation helper
+// When one side has winning material advantage and opponent has no pawns/few pieces,
+// reward driving opponent king to edge/corner and bringing own king closer.
+static int evaluate_mop_up(const Position *pos, int winning_side) {
+    int losing_side = winning_side ^ 1;
+    
+    uint64_t w_k_bb = pos->piece_bbs[KING] & pos->color_bbs[winning_side];
+    uint64_t l_k_bb = pos->piece_bbs[KING] & pos->color_bbs[losing_side];
+    
+    if (!w_k_bb || !l_k_bb) return 0;
+    
+    int w_king_sq = get_lsb(w_k_bb);
+    int l_king_sq = get_lsb(l_k_bb);
+    
+    if (w_king_sq < 0 || w_king_sq >= 64 || l_king_sq < 0 || l_king_sq >= 64) return 0;
+    
+    int l_king_rank = l_king_sq / 8;
+    int l_king_file = l_king_sq % 8;
+    int w_king_rank = w_king_sq / 8;
+    int w_king_file = w_king_sq % 8;
+    
+    int file_dist_from_center = l_king_file <= 3 ? (3 - l_king_file) : (l_king_file - 4);
+    int rank_dist_from_center = l_king_rank <= 3 ? (3 - l_king_rank) : (l_king_rank - 4);
+    int center_dist = file_dist_from_center + rank_dist_from_center;
+    
+    int rank_diff = abs(w_king_rank - l_king_rank);
+    int file_diff = abs(w_king_file - l_king_file);
+    int king_dist = rank_diff > file_diff ? rank_diff : file_diff;
+    
+    return (center_dist * 10) + ((7 - king_dist) * 20);
+}
+
 // Evaluate the position from White's perspective
 int evaluate(const Position *pos) {
     int mg_score = 0;
@@ -218,6 +250,15 @@ int evaluate(const Position *pos) {
 
     mg_score += white_castling_bonus;
     mg_score -= black_castling_bonus;
+
+    // Endgame mop-up evaluation for decisive material advantage
+    int w_mat = count_bits(w_pawns)*100 + count_bits(w_knights)*300 + count_bits(w_bishops)*300 + count_bits(w_rooks)*500 + count_bits(w_queens)*900;
+    int b_mat = count_bits(b_pawns)*100 + count_bits(b_knights)*300 + count_bits(b_bishops)*300 + count_bits(b_rooks)*500 + count_bits(b_queens)*900;
+    if (w_mat - b_mat >= 300 && b_mat <= 300) {
+        eg_score += evaluate_mop_up(pos, WHITE);
+    } else if (b_mat - w_mat >= 300 && w_mat <= 300) {
+        eg_score -= evaluate_mop_up(pos, BLACK);
+    }
 
     // Opening Piece Development & Unblocking Evaluation (Middlegame phase >= 12)
     if (phase >= 12) {

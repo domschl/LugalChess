@@ -69,5 +69,8 @@ typedef uint16_t Move;
 #define MAX_PLYS 2048
 #define MAX_MOVES 256
 
+#define MATE_VALUE 29000
+#define INFINITY_VALUE 30000
+
 
 #endif // DEFS_H

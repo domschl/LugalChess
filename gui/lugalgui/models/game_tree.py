@@ -41,7 +41,10 @@ class GameTree:
     def load_fen(self, fen: str) -> bool:
         """Load a custom FEN position."""
         try:
-            self.board = chess.Board(fen)
+            board = chess.Board(fen)
+            if not board.is_valid():
+                return False
+            self.board = board
             self.root = GameNode()
             self.current_node = self.root
             self.move_history.clear()

@@ -33,6 +33,7 @@ typedef struct {
 
 // Parse/Display
 void parse_fen(Position *pos, const char *fen);
+bool is_position_valid(const Position *pos);
 void generate_fen(const Position *pos, char *buf);
 void print_board(const Position *pos);
 void print_position_info(const Position *pos);
