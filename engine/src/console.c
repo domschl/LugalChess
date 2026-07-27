@@ -327,9 +327,35 @@ void search_poll_stop_callback(void) {
 
 // Current Position pointer for menu evaluations
 #else
-// Dummy search callbacks for host build
-void search_progress_callback(Move move, int score, int depth) {}
-void search_poll_stop_callback(void) {}
+// Host search callbacks
+void search_progress_callback(Move move, int score, int depth) { (void)move; (void)score; (void)depth; }
+
+#if defined(_WIN32)
+#include <conio.h>
+#else
+#include <sys/select.h>
+#include <unistd.h>
+#endif
+
+void search_poll_stop_callback(void) {
+#if defined(_WIN32)
+    if (_kbhit()) {
+        while (_kbhit()) _getch();
+        stop_search = true;
+    }
+#else
+    struct timeval tv = {0, 0};
+    fd_set fds;
+    FD_ZERO(&fds);
+    FD_SET(STDIN_FILENO, &fds);
+    if (select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv) > 0) {
+        char buf[128];
+        if (fgets(buf, sizeof(buf), stdin)) {
+            stop_search = true;
+        }
+    }
+#endif
+}
 #endif
 
 // Print commands help
@@ -343,6 +369,7 @@ static void print_help(void) {
     printf("  save            - Save the current position and settings\n");
     printf("  load            - Load the saved position and settings\n");
     printf("  go              - Force the engine to think and play a move\n");
+    printf("  stop            - Interrupt engine search during calculation (or press Enter)\n");
     printf("  undo            - Take back 1 half-move\n");
     printf("  redo            - Re-apply 1 half-move\n");
     printf("  eval            - Print the static evaluation score of the current position\n");
@@ -1410,6 +1437,10 @@ void console_loop(void) {
         } 
         else if (strcmp(line, "quit") == 0) {
             break;
+        } 
+        else if (strcmp(line, "stop") == 0) {
+            // Stop command when engine is not currently thinking
+            printf("Engine is not currently thinking.\n");
         } 
         else {
             // Try to parse input as a player move

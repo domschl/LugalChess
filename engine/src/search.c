@@ -629,8 +629,15 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
         printf("\n");
         fflush(stdout);
 
-        // If mate is detected (e.g. M1, M2, M3), stop calculating deeper levels!
-        if (completed_best_score >= MATE_VALUE - 1000 || completed_best_score <= -MATE_VALUE + 1000) {
+        // If mate is detected, only stop if search depth 'd' is sufficient to guarantee the mate distance,
+        // or if it's mate in 1 move (M1). Otherwise, continue searching to find shorter mates!
+        int mate_plies = 0;
+        if (completed_best_score >= MATE_VALUE - 1000) {
+            mate_plies = INFINITY_VALUE - completed_best_score;
+        } else if (completed_best_score <= -MATE_VALUE + 1000) {
+            mate_plies = INFINITY_VALUE + completed_best_score;
+        }
+        if (mate_plies > 0 && d >= mate_plies) {
             break;
         }
 
