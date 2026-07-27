@@ -218,6 +218,7 @@ bool make_move(Position *pos, Move move) {
     pos->history[pos->history_ply].en_passant = pos->en_passant;
     pos->history[pos->history_ply].castling_rights = pos->castling_rights;
     pos->history[pos->history_ply].halfmove = pos->halfmove;
+    pos->history[pos->history_ply].fullmove = pos->fullmove;
     pos->history[pos->history_ply].hash_key = pos->hash_key;
 
     // Determine capture
@@ -343,11 +344,6 @@ void unmake_move(Position *pos) {
     int to = MOVE_TO(move);
     int flags = MOVE_FLAGS(move);
     
-    // Decrement fullmove if restoring Black's turn
-    if (pos->side == WHITE) {
-        pos->fullmove--;
-    }
-    
     // Toggle side back
     pos->side ^= 1;
     
@@ -411,6 +407,7 @@ void unmake_move(Position *pos) {
     pos->en_passant = pos->history[pos->history_ply].en_passant;
     pos->castling_rights = pos->history[pos->history_ply].castling_rights;
     pos->halfmove = pos->history[pos->history_ply].halfmove;
+    pos->fullmove = pos->history[pos->history_ply].fullmove;
     pos->hash_key = pos->history[pos->history_ply].hash_key;
 }
 
@@ -421,6 +418,7 @@ bool make_null_move(Position *pos) {
     pos->history[pos->history_ply].en_passant = pos->en_passant;
     pos->history[pos->history_ply].castling_rights = pos->castling_rights;
     pos->history[pos->history_ply].halfmove = pos->halfmove;
+    pos->history[pos->history_ply].fullmove = pos->fullmove;
     pos->history[pos->history_ply].captured_piece = NO_PIECE;
     pos->history[pos->history_ply].hash_key = pos->hash_key;
 
@@ -449,13 +447,11 @@ void unmake_null_move(Position *pos) {
     pos->history_ply--;
     
     pos->side ^= 1;
-    if (pos->side == WHITE) {
-        pos->fullmove--;
-    }
     
     pos->en_passant = pos->history[pos->history_ply].en_passant;
     pos->castling_rights = pos->history[pos->history_ply].castling_rights;
     pos->halfmove = pos->history[pos->history_ply].halfmove;
+    pos->fullmove = pos->history[pos->history_ply].fullmove;
     pos->hash_key = pos->history[pos->history_ply].hash_key;
 }
 

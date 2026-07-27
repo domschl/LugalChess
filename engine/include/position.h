@@ -9,6 +9,7 @@ typedef struct {
     int en_passant;
     int castling_rights;
     int halfmove;
+    int fullmove;
     int captured_piece;
     uint64_t hash_key;
 } UndoState;
