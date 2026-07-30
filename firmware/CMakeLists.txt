@@ -45,7 +45,11 @@ target_include_directories(lugalchess_firmware PRIVATE
 )
 
 # Set compile definitions (use 0 KB on-the-fly sliding attacks for embedded RAM limits)
-target_compile_definitions(lugalchess_firmware PRIVATE USE_MAGIC_BITBOARDS=0)
+if(USE_RISCV)
+    target_compile_definitions(lugalchess_firmware PRIVATE USE_MAGIC_BITBOARDS=0 PICO_STACK_SIZE=4096 PICO_CORE1_STACK_SIZE=2048)
+else()
+    target_compile_definitions(lugalchess_firmware PRIVATE USE_MAGIC_BITBOARDS=0 PICO_STACK_SIZE=4096)
+endif()
 
 # Link hardware libraries
 target_link_libraries(lugalchess_firmware PRIVATE

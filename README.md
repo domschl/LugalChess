@@ -138,10 +138,13 @@ brew install cmake ninja
 
 #### ARM Cortex-M33 Build (Default)
 ```bash
-mkdir build_firmware && cd build_firmware
+mkdir build_firmware_arm && cd build_firmware_arm
 cmake -DPICO_PLATFORM=rp2350 ../firmware
 make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 ```
+
+> [!NOTE]
+> **Performance Benchmark**: The RP2350 ARM Cortex-M33 core runs approximately **1.6× faster** in engine search nodes per second (NPS) than the Hazard3 RISC-V core.
 
 #### RISC-V (Hazard3 Cores) Build
 The RP2350 microcontroller features dual Hazard3 RISC-V cores. To build specifically for the RISC-V target architecture, pass `-DUSE_RISCV=ON` or `-DPICO_PLATFORM=rp2350-riscv` (requires a RISC-V cross-compiler toolchain such as `gcc-riscv64-unknown-elf` or `gcc-riscv-none-embed`):
@@ -164,9 +167,9 @@ make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 ```
 
 > [!TIP]
-> To clean and re-configure `build_firmware` without re-downloading the Pico SDK (`_deps` folder), preserve `_deps`:
+> To clean and re-configure `build_firmware_arm` or `build_firmware_riscv` without re-downloading the Pico SDK (`_deps` folder), preserve `_deps`:
 > ```bash
-> find build_firmware -mindepth 1 ! -path 'build_firmware/_deps*' -delete
+> find build_firmware_arm -mindepth 1 ! -path 'build_firmware_arm/_deps*' -delete
 > ```
 
 Flash `lugalchess_firmware.uf2` by dropping it onto the RP2350 BOOTSEL volume. The RP2350 bootloader automatically detects the RISC-V binary metadata header in the UF2 file and boots the chip directly using its Hazard3 RISC-V cores.

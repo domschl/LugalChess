@@ -11,6 +11,11 @@
 #include <string.h>
 #include <stdio.h>
 
+#if defined(LUGALCHESS_EMBEDDED)
+#include "pico/stdlib.h"
+#include "pico/time.h"
+#endif
+
 // Global search variables
 int max_search_depth = 64;
 long max_search_time_ms = -1;
@@ -30,66 +35,110 @@ typedef struct {
     const char *moves;
 } BookEntry;
 
+#if defined(__GNUC__) || defined(__clang__)
+#define ALIGN4 __attribute__((aligned(4)))
+#else
+#define ALIGN4
+#endif
+
+static const char ALIGN4 book_move_0[]  = "e2e4 e7e5 g1f3 b8c6 f1b5 a7a6 b5a4 g8f6 e1g1 f8e7";
+static const char ALIGN4 book_move_1[]  = "e2e4 e7e5 g1f3 b8c6 f1c4 f8c5 c2c3 g8f6 d2d4";
+static const char ALIGN4 book_move_2[]  = "e2e4 c7c5 g1f3 d7d6 d2d4 c5d4 f3d4 g8f6 b1c3 a7a6";
+static const char ALIGN4 book_move_3[]  = "e2e4 c7c5 g1f3 e7e6 d2d4 c5d4 f3d4 b8c6 b1c3 d7d6";
+static const char ALIGN4 book_move_4[]  = "e2e4 c7c5 c2c3 d7d5 e4d5 d8d5 d2d4 g8f6";
+static const char ALIGN4 book_move_5[]  = "e2e4 e7e6 d2d4 d7d5 b1c3 g8f6 c1g5 f8e7";
+static const char ALIGN4 book_move_6[]  = "e2e4 c7c6 d2d4 d7d5 b1c3 d5e4 c3e4 c8f5";
+static const char ALIGN4 book_move_7[]  = "e2e4 d7d6 d2d4 g8f6 b1c3 g7g6 f2f4 f8g7";
+static const char ALIGN4 book_move_8[]  = "d2d4 d7d5 c2c4 e7e6 b1c3 g8f6 c1g5 f8e7";
+static const char ALIGN4 book_move_9[]  = "d2d4 d7d5 c2c4 c7c6 g1f3 g8f6 b1c3 e7e6";
+static const char ALIGN4 book_move_10[] = "d2d4 g8f6 c2c4 g7g6 b1c3 f8g7 e4e5 d6d6";
+static const char ALIGN4 book_move_11[] = "d2d4 g8f6 c2c4 e7e6 g1f3 b7b6 g2g3 c8b7";
+static const char ALIGN4 book_move_12[] = "d2d4 g8f6 c2c4 e7e6 b1c3 f8b4 e2e3 e1g1";
+static const char ALIGN4 book_move_13[] = "g1f3 d7d5 g2g3 g8f6 f1g2 c7c6 e1g1 c8f5";
+static const char ALIGN4 book_move_14[] = "c2c4 e7e5 b1c3 g8f6 g1f3 b8c6 g2g3 f8b4";
+static const char ALIGN4 book_move_15[] = "f2f4 d7d5 g1f3 g8f6 e2e3 c7c5 f1e2 b8c6";
+
 static const BookEntry book_entries[] = {
     // 1. e4 lines
-    { "Ruy Lopez",        "e2e4 e7e5 g1f3 b8c6 f1b5 a7a6 b5a4 g8f6 e1g1 f8e7" },
-    { "Italian",          "e2e4 e7e5 g1f3 b8c6 f1c4 f8c5 c2c3 g8f6 d2d4" },
-    { "Sicil Najdorf",    "e2e4 c7c5 g1f3 d7d6 d2d4 c5d4 f3d4 g8f6 b1c3 a7a6" },
-    { "Sicil Taimanov",   "e2e4 c7c5 g1f3 e7e6 d2d4 c5d4 f3d4 b8c6 b1c3 d7d6" },
-    { "Sicil Alapin",     "e2e4 c7c5 c2c3 d7d5 e4d5 d8d5 d2d4 g8f6" },
-    { "French Class.",   "e2e4 e7e6 d2d4 d7d5 b1c3 g8f6 c1g5 f8e7" },
-    { "Caro-Kann",        "e2e4 c7c6 d2d4 d7d5 b1c3 d5e4 c3e4 c8f5" },
-    { "Pirc Def.",        "e2e4 d7d6 d2d4 g8f6 b1c3 g7g6 f2f4 f8g7" },
+    { "Ruy Lopez",        book_move_0 },
+    { "Italian",          book_move_1 },
+    { "Sicil Najdorf",    book_move_2 },
+    { "Sicil Taimanov",   book_move_3 },
+    { "Sicil Alapin",     book_move_4 },
+    { "French Class.",   book_move_5 },
+    { "Caro-Kann",        book_move_6 },
+    { "Pirc Def.",        book_move_7 },
     // 2. d4 lines
-    { "QGD",              "d2d4 d7d5 c2c4 e7e6 b1c3 g8f6 c1g5 f8e7" },
-    { "Slav Def.",        "d2d4 d7d5 c2c4 c7c6 g1f3 g8f6 b1c3 e7e6" },
-    { "King's Indian",   "d2d4 g8f6 c2c4 g7g6 b1c3 f8g7 e4e5 d6d6" },
-    { "Queen's Indian",  "d2d4 g8f6 c2c4 e7e6 g1f3 b7b6 g2g3 c8b7" },
-    { "Nimzo-Indian",    "d2d4 g8f6 c2c4 e7e6 b1c3 f8b4 e2e3 e1g1" },
+    { "QGD",              book_move_8 },
+    { "Slav Def.",        book_move_9 },
+    { "King's Indian",   book_move_10 },
+    { "Queen's Indian",  book_move_11 },
+    { "Nimzo-Indian",    book_move_12 },
     // 3. Flank openings
-    { "King's Ind Atk",   "g1f3 d7d5 g2g3 g8f6 f1g2 c7c6 e1g1 c8f5" },
-    { "English Op.",     "c2c4 e7e5 b1c3 g8f6 g1f3 b8c6 g2g3 f8b4" },
-    { "Bird's Op.",      "f2f4 d7d5 g1f3 g8f6 e2e3 c7c5 f1e2 b8c6" }
+    { "King's Ind Atk",   book_move_13 },
+    { "English Op.",     book_move_14 },
+    { "Bird's Op.",      book_move_15 }
 };
+
+#define MAX_SEARCH_PLYS 32
+
+static MoveList search_pv_movelists[MAX_SEARCH_PLYS];
+static int sort_scores[MAX_MOVES];
+
+__attribute__((noinline))
+static bool match_book_prefix(const char *line_ptr, const char *history_ptr, int history_len) {
+    if (!line_ptr || !history_ptr) return false;
+    volatile const uint8_t *line = (volatile const uint8_t *)line_ptr;
+    volatile const uint8_t *history = (volatile const uint8_t *)history_ptr;
+    for (int i = 0; i < history_len; i++) {
+        uint8_t c1 = line[i];
+        uint8_t c2 = history[i];
+        if (c1 == 0 || c1 != c2) return false;
+    }
+    uint8_t next_ch = line[history_len];
+    return (next_ch == ' ' || next_ch == 0);
+}
+
+static int build_history_string(const Position *pos, char *buf, size_t buf_size) {
+    if (!pos || buf_size == 0) return 0;
+    buf[0] = '\0';
+    int offset = 0;
+    for (int i = 0; i < pos->history_ply; i++) {
+        Move m = pos->history[i].move;
+        int from = MOVE_FROM(m);
+        int to = MOVE_TO(m);
+        if (offset > 0) {
+            if ((size_t)offset + 1 >= buf_size) break;
+            buf[offset++] = ' ';
+        }
+        if ((size_t)offset + 5 >= buf_size) break;
+        buf[offset++] = 'a' + (from % 8);
+        buf[offset++] = '1' + (from / 8);
+        buf[offset++] = 'a' + (to % 8);
+        buf[offset++] = '1' + (to / 8);
+        if (move_is_promo(m)) {
+            int promo = move_promo_piece(m);
+            const char promo_chars[] = "pnbrqk";
+            if ((size_t)offset + 1 >= buf_size) break;
+            buf[offset++] = promo_chars[promo];
+        }
+        buf[offset] = '\0';
+    }
+    return offset;
+}
 
 const char *get_book_line_name(const Position *pos) {
     if (pos == NULL || pos->history_ply == 0) {
         return NULL;
     }
 
-    char history_str[512] = "";
-    int offset = 0;
-    for (int i = 0; i < pos->history_ply; i++) {
-        Move m = pos->history[i].move;
-        int from = MOVE_FROM(m);
-        int to = MOVE_TO(m);
-        char m_str[6];
-        m_str[0] = 'a' + (from % 8);
-        m_str[1] = '1' + (from / 8);
-        m_str[2] = 'a' + (to % 8);
-        m_str[3] = '1' + (to / 8);
-        m_str[4] = '\0';
-        if (move_is_promo(m)) {
-            int promo = move_promo_piece(m);
-            const char promo_chars[] = "pnbrqk";
-            m_str[4] = promo_chars[promo];
-            m_str[5] = '\0';
-        }
-        
-        int len = snprintf(history_str + offset, sizeof(history_str) - offset, "%s%s", i > 0 ? " " : "", m_str);
-        if (len < 0 || offset + len >= (int)sizeof(history_str)) {
-            return NULL;
-        }
-        offset += len;
-    }
-
-    int history_len = strlen(history_str);
+    static char history_str[512];
+    int history_len = build_history_string(pos, history_str, sizeof(history_str));
     if (history_len == 0) return NULL;
 
     int book_size = sizeof(book_entries) / sizeof(book_entries[0]);
     for (int i = 0; i < book_size; i++) {
-        const char *line = book_entries[i].moves;
-        if (strncmp(line, history_str, history_len) == 0 && (line[history_len] == ' ' || line[history_len] == '\0')) {
+        if (match_book_prefix(book_entries[i].moves, history_str, history_len)) {
             return book_entries[i].name;
         }
     }
@@ -97,108 +146,132 @@ const char *get_book_line_name(const Position *pos) {
     return NULL;
 }
 
-static Move get_book_move(Position *pos) {
-    char history_str[512] = "";
-    int offset = 0;
-    for (int i = 0; i < pos->history_ply; i++) {
-        Move m = pos->history[i].move;
-        int from = MOVE_FROM(m);
-        int to = MOVE_TO(m);
-        char m_str[6];
-        m_str[0] = 'a' + (from % 8);
-        m_str[1] = '1' + (from / 8);
-        m_str[2] = 'a' + (to % 8);
-        m_str[3] = '1' + (to / 8);
-        m_str[4] = '\0';
-        if (move_is_promo(m)) {
-            int promo = move_promo_piece(m);
-            const char promo_chars[] = "pnbrqk";
-            m_str[4] = promo_chars[promo];
-            m_str[5] = '\0';
-        }
-        
-        int len = snprintf(history_str + offset, sizeof(history_str) - offset, "%s%s", i > 0 ? " " : "", m_str);
-        if (len < 0 || offset + len >= (int)sizeof(history_str)) {
-            return 0;
-        }
-        offset += len;
+__attribute__((noinline))
+static bool move_str_equals(const char *s1, const char *s2) {
+    for (int k = 0; k < 6; k++) {
+        if (s1[k] != s2[k]) return false;
+        if (s1[k] == '\0') break;
     }
+    return true;
+}
 
-    const char *candidates[64];
-    int candidate_count = 0;
-    int history_len = strlen(history_str);
+__attribute__((noinline))
+static void move_str_copy(char *dest, const char *src) {
+    for (int k = 0; k < 6; k++) {
+        dest[k] = src[k];
+        if (src[k] == '\0') break;
+    }
+    dest[7] = '\0';
+}
+
+static Move get_book_move(Position *pos) {
+    static char history_str[512];
+    int history_len = build_history_string(pos, history_str, sizeof(history_str));
+
+    static char next_move_strs[64][8];
+    int unique_count = 0;
 
     int book_size = sizeof(book_entries) / sizeof(book_entries[0]);
-    for (int i = 0; i < book_size; i++) {
+    for (int i = 0; i < book_size && unique_count < 64; i++) {
         const char *line = book_entries[i].moves;
         if (history_len == 0) {
-            candidates[candidate_count++] = line;
-        } else {
-            if (strncmp(line, history_str, history_len) == 0 && (line[history_len] == ' ' || line[history_len] == '\0')) {
-                if (line[history_len] == ' ') {
-                    candidates[candidate_count++] = line + history_len + 1;
+            char next_m[8];
+            int c = 0;
+            while (line[c] != ' ' && line[c] != '\0' && c < 5) {
+                next_m[c] = line[c];
+                c++;
+            }
+            next_m[c] = '\0';
+
+            if (c >= 4) {
+                bool is_unique = true;
+                for (int j = 0; j < unique_count; j++) {
+                    if (move_str_equals(next_move_strs[j], next_m)) {
+                        is_unique = false;
+                        break;
+                    }
+                }
+                if (is_unique) {
+                    move_str_copy(next_move_strs[unique_count], next_m);
+                    unique_count++;
                 }
             }
-        }
-        if (candidate_count >= 64) break;
-    }
+        } else {
+            if (match_book_prefix(line, history_str, history_len)) {
+                volatile const uint8_t *line_bytes = (volatile const uint8_t *)line;
+                if (line_bytes[history_len] == ' ') {
+                    volatile const uint8_t *p = line_bytes + history_len + 1;
+                    char next_m[8];
+                    int c = 0;
+                    while (p[c] != ' ' && p[c] != 0 && c < 5) {
+                        next_m[c] = (char)p[c];
+                        c++;
+                    }
+                    next_m[c] = '\0';
 
-    if (candidate_count == 0) {
-        return 0;
-    }
-
-    char next_move_strs[64][6];
-    int unique_count = 0;
-    for (int i = 0; i < candidate_count; i++) {
-        const char *cand = candidates[i];
-        char next_m[6];
-        int c_idx = 0;
-        while (cand[c_idx] != ' ' && cand[c_idx] != '\0' && c_idx < 5) {
-            next_m[c_idx] = cand[c_idx];
-            c_idx++;
-        }
-        next_m[c_idx] = '\0';
-
-        bool is_unique = true;
-        for (int j = 0; j < unique_count; j++) {
-            if (strcmp(next_move_strs[j], next_m) == 0) {
-                is_unique = false;
-                break;
+                    if (c >= 4) {
+                        bool is_unique = true;
+                        for (int j = 0; j < unique_count; j++) {
+                            if (move_str_equals(next_move_strs[j], next_m)) {
+                                is_unique = false;
+                                break;
+                            }
+                        }
+                        if (is_unique) {
+                            move_str_copy(next_move_strs[unique_count], next_m);
+                            unique_count++;
+                        }
+                    }
+                }
             }
-        }
-        if (is_unique) {
-            strcpy(next_move_strs[unique_count++], next_m);
         }
     }
 
     if (unique_count == 0) return 0;
 
-    int choice = rand() % unique_count;
-    const char *chosen_move_str = next_move_strs[choice];
+    uint32_t seed = (uint32_t)start_search_time_ms;
+#if defined(LUGALCHESS_EMBEDDED)
+    seed ^= time_us_32();
+#endif
+    int choice = (int)(seed % (uint32_t)unique_count);
+    const char *chosen = next_move_strs[choice];
 
-    MoveList list;
-    generate_moves(pos, &list);
-    for (int i = 0; i < list.count; i++) {
-        Move m = list.moves[i];
-        if (make_move(pos, m)) {
-            unmake_move(pos);
-            int from = MOVE_FROM(m);
-            int to = MOVE_TO(m);
-            char m_str[6];
-            m_str[0] = 'a' + (from % 8);
-            m_str[1] = '1' + (from / 8);
-            m_str[2] = 'a' + (to % 8);
-            m_str[3] = '1' + (to / 8);
-            m_str[4] = '\0';
-            if (move_is_promo(m)) {
-                int promo = move_promo_piece(m);
-                const char promo_chars[] = "pnbrqk";
-                m_str[4] = promo_chars[promo];
-                m_str[5] = '\0';
-            }
+    if (chosen[0] < 'a' || chosen[0] > 'h' || chosen[1] < '1' || chosen[1] > '8' ||
+        chosen[2] < 'a' || chosen[2] > 'h' || chosen[3] < '1' || chosen[3] > '8') {
+        return 0;
+    }
 
-            if (strcmp(m_str, chosen_move_str) == 0) {
-                return m;
+    int target_from = (chosen[0] - 'a') + (chosen[1] - '1') * 8;
+    int target_to = (chosen[2] - 'a') + (chosen[3] - '1') * 8;
+    int target_promo = NO_PIECE;
+    if (chosen[4] != '\0') {
+        switch (chosen[4]) {
+            case 'q': target_promo = QUEEN; break;
+            case 'r': target_promo = ROOK; break;
+            case 'b': target_promo = BISHOP; break;
+            case 'n': target_promo = KNIGHT; break;
+        }
+    }
+
+    MoveList *list = &search_pv_movelists[0];
+    generate_moves(pos, list);
+    for (int i = 0; i < list->count; i++) {
+        Move m = list->moves[i];
+        if (MOVE_FROM(m) == target_from && MOVE_TO(m) == target_to) {
+            if (target_promo != NO_PIECE) {
+                if (move_is_promo(m) && move_promo_piece(m) == target_promo) {
+                    if (make_move(pos, m)) {
+                        unmake_move(pos);
+                        return m;
+                    }
+                }
+            } else {
+                if (!move_is_promo(m)) {
+                    if (make_move(pos, m)) {
+                        unmake_move(pos);
+                        return m;
+                    }
+                }
             }
         }
     }
@@ -207,11 +280,17 @@ static Move get_book_move(Position *pos) {
 }
 
 // Time check helper
+#if defined(LUGALCHESS_EMBEDDED)
+static long get_time_ms(void) {
+    return (long)(time_us_32() / 1000);
+}
+#else
 static long get_time_ms(void) {
     struct timeval tv;
     gettimeofday(&tv, NULL);
     return tv.tv_sec * 1000 + tv.tv_usec / 1000;
 }
+#endif
 
 static void check_up_time(void) {
     if ((nodes_searched & 2047) == 0) {
@@ -270,22 +349,24 @@ static int score_move(const Position *pos, Move move, Move tt_move, int ply) {
 
 // Insertion sort for move list (fast for small arrays)
 static void sort_moves(const Position *pos, MoveList *list, Move tt_move, int ply) {
-    int scores[MAX_MOVES];
+    if (list->count <= 1) return;
+
+    int safe_ply = (ply >= 0 && ply < MAX_PLYS) ? ply : 0;
     for (int i = 0; i < list->count; i++) {
-        scores[i] = score_move(pos, list->moves[i], tt_move, ply);
+        sort_scores[i] = score_move(pos, list->moves[i], tt_move, safe_ply);
     }
     
     for (int i = 1; i < list->count; i++) {
         Move temp_m = list->moves[i];
-        int temp_s = scores[i];
+        int temp_s = sort_scores[i];
         int j = i - 1;
-        while (j >= 0 && scores[j] < temp_s) {
+        while (j >= 0 && sort_scores[j] < temp_s) {
             list->moves[j + 1] = list->moves[j];
-            scores[j + 1] = scores[j];
+            sort_scores[j + 1] = sort_scores[j];
             j--;
         }
         list->moves[j + 1] = temp_m;
-        scores[j + 1] = temp_s;
+        sort_scores[j + 1] = temp_s;
     }
 }
 
@@ -309,12 +390,13 @@ int quiescence(Position *pos, int alpha, int beta) {
         alpha = stand_pat;
     }
     
-    MoveList list;
-    generate_captures(pos, &list);
-    sort_moves(pos, &list, 0, 0);
+    int q_ply = pos->history_ply % MAX_SEARCH_PLYS;
+    MoveList *list = &search_pv_movelists[q_ply];
+    generate_captures(pos, list);
+    sort_moves(pos, list, 0, q_ply);
     
-    for (int i = 0; i < list.count; i++) {
-        if (!make_move(pos, list.moves[i])) {
+    for (int i = 0; i < list->count; i++) {
+        if (!make_move(pos, list->moves[i])) {
             continue;
         }
         int score = -quiescence(pos, -beta, -alpha);
@@ -340,7 +422,7 @@ int pv_search(Position *pos, int depth, int ply, int alpha, int beta, bool null_
     if (stop_search) return 0;
 
     // Safety guard to prevent stack overflow/out-of-bounds history plies
-    if (ply >= MAX_PLYS - 1 || pos->history_ply >= MAX_PLYS - 1) {
+    if (ply >= MAX_SEARCH_PLYS - 1 || pos->history_ply >= MAX_PLYS - 1) {
         return evaluate(pos);
     }
 
@@ -397,17 +479,18 @@ int pv_search(Position *pos, int depth, int ply, int alpha, int beta, bool null_
     }
 
     // Move generation
-    MoveList list;
-    generate_moves(pos, &list);
-    sort_moves(pos, &list, tt_move, ply);
+    int safe_ply = ply % MAX_SEARCH_PLYS;
+    MoveList *list = &search_pv_movelists[safe_ply];
+    generate_moves(pos, list);
+    sort_moves(pos, list, tt_move, safe_ply);
 
     int legal_moves = 0;
     int best_score = -INFINITY_VALUE;
     Move best_move = 0;
     uint8_t tt_flag = TT_ALPHA;
 
-    for (int i = 0; i < list.count; i++) {
-        Move move = list.moves[i];
+    for (int i = 0; i < list->count; i++) {
+        Move move = list->moves[i];
         if (!make_move(pos, move)) {
             continue;
         }
@@ -501,6 +584,9 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
     // Check if there is an opening book move
     Move book_move = get_book_move(pos);
     if (book_move != 0) {
+        extern void search_progress_callback(Move move, int score, int depth);
+        search_progress_callback(book_move, 0, 1);
+
         int from = MOVE_FROM(book_move);
         int to = MOVE_TO(book_move);
         printf("bestmove %c%d%c%d", 'a' + (from % 8), (from / 8) + 1, 'a' + (to % 8), (to / 8) + 1);
@@ -527,6 +613,7 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
         depth += 2;
     }
 
+    printf("[DEBUG] search_position: getting start time...\n"); fflush(stdout);
     start_search_time_ms = get_time_ms();
     srand((unsigned int)(time(NULL) ^ start_search_time_ms));
     max_search_time_ms = time_limit_ms;
@@ -537,6 +624,7 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
     // Reset move ordering heuristics
     memset(killer_moves, 0, sizeof(killer_moves));
     
+    printf("[DEBUG] search_position: generating root moves...\n"); fflush(stdout);
     MoveList root_list;
     generate_moves(pos, &root_list);
     Move fallback_move = 0;
@@ -553,13 +641,16 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
 
     long prev_iter_time_ms = 0;
 
+    printf("[DEBUG] search_position: starting iterative deepening loop...\n"); fflush(stdout);
     // Iterative Deepening
     for (int d = 1; d <= depth; d++) {
+        printf("[DEBUG] search_position: depth %d start...\n", d); fflush(stdout);
         long iter_start_time_ms = get_time_ms();
 
         extern void search_progress_callback(Move move, int score, int depth);
         search_progress_callback(0, 0, d);
         int score = pv_search(pos, d, 0, -INFINITY_VALUE, INFINITY_VALUE, true);
+        printf("[DEBUG] search_position: depth %d pv_search returned %d\n", d, score); fflush(stdout);
         
         // If search was interrupted mid-iteration by stop/timer, discard incomplete depth results!
         if (stop_search) {

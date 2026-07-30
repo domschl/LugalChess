@@ -1,6 +1,6 @@
 # Build directories
 build/
-build_firmware/
+build_firmware_arm/
 build_firmware_riscv/
 CMakeCache.txt
 CMakeFiles/
