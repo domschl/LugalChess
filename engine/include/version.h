@@ -23,6 +23,11 @@
 #  define LUGALCHESS_PLATFORM "Unknown"
 #endif
 
+// Embedded microcontroller target detection (RP2040 / RP2350 ARM32 or RISCV32 on Pico SDK)
+#if defined(PICO_ON_DEVICE) || defined(PICO_BOARD) || (defined(__riscv) && !defined(__linux__) && !defined(__unix__) && !defined(__APPLE__) && !defined(_WIN32)) || (defined(__arm__) && !defined(__linux__) && !defined(__unix__) && !defined(__APPLE__) && !defined(_WIN32))
+#  define LUGALCHESS_EMBEDDED 1
+#endif
+
 // 7-segment display platform string (max 8 digits for 8-segment TM1638 display)
 #if defined(__riscv)
 #  define LUGALCHESS_7SEG_PLATFORM "rISc0.1.0"

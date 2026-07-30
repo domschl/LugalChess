@@ -10,7 +10,7 @@ void init_tt(int size_mb) {
     }
 
     uint64_t bytes;
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
     // On microcontrollers, ignore size_mb and allocate a safe 32KB table (2048 entries)
     bytes = 32 * 1024ULL;
 #else

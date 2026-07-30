@@ -42,18 +42,18 @@ static void format_move_str(Move move, char *move_str) {
     }
 }
 
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
 static void sync_moves_from_history(const Position *pos);
 #endif
 
-#if !defined(__arm__) && !defined(PICO_BOARD)
+#if !defined(LUGALCHESS_EMBEDDED)
 static void reset_game_search_state(void) {
     has_last_search_score = false;
     last_search_score_white = 0;
 }
 #endif
 
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
 #include "pico/stdlib.h"
 #include "hardware/flash.h"
 #include "hardware/sync.h"
@@ -256,7 +256,7 @@ static void update_thinking_display(void) {
     snprintf(display_buf, sizeof(display_buf), "%s%s", uppercase_move, right_str);
     tm1638_display_string(display_buf);
 
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
     if (current_pos_ptr) {
         int w_score = (game_side_to_move == WHITE) ? current_search_score : -current_search_score;
         last_search_score_white = w_score;
@@ -469,7 +469,7 @@ static void make_engine_move(Position *pos) {
     fflush(stdout);
 
     stop_search = false;
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
     current_search_best_move = 0;
     current_search_score = 0;
     current_search_depth = 1;
@@ -481,7 +481,7 @@ static void make_engine_move(Position *pos) {
     // Retrieve best move and score (from current search progress callback or probe TT entry)
     Move best_move = 0;
     int score = 0;
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
     best_move = current_search_best_move;
     score = current_search_score;
 #endif
@@ -528,7 +528,7 @@ static void make_engine_move(Position *pos) {
         
         make_move(pos, best_move);
         max_history_ply = pos->history_ply;
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
         last_engine_move[0] = 'a' + (from % 8);
         last_engine_move[1] = '1' + (from / 8);
         last_engine_move[2] = 'a' + (to % 8);
@@ -549,7 +549,7 @@ static void make_engine_move(Position *pos) {
 
     } else {
         printf("Engine resigned or found no legal moves.\n");
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
         if (!check_and_display_game_over(pos)) {
             check_and_update_check_status(pos);
         }
@@ -557,7 +557,7 @@ static void make_engine_move(Position *pos) {
     }
 }
 
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
 
 static bool is_player_move_promotion(const char *move_str) {
     if (!current_pos_ptr) return false;
@@ -581,14 +581,14 @@ static bool is_player_move_promotion(const char *move_str) {
 // Portable line reader that echos characters, handles backspace/delete, and handles \r/\n
 static void get_line_custom(char *buffer, int max_len) {
     int len = 0;
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
     static char keypad_input[6] = "";
     static int keypad_len = 0;
 #endif
 
     while (len < max_len - 1) {
         int c;
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
         // 1. Poll TM1638 Keypad directly on Core 0
         int key = tm1638_get_key();
         if (key != -1) {
@@ -904,7 +904,7 @@ static void get_line_custom(char *buffer, int max_len) {
             continue;
         }
 
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
         if (game_status_msg[0] != '\0') {
             strcpy(game_status_msg, "");
             display_show_moves = true;
@@ -938,7 +938,7 @@ static void get_line_custom(char *buffer, int max_len) {
     }
 }
 
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
 static void sync_moves_from_history(const Position *pos) {
     if (pos->history_ply >= 2) {
         format_move_str(pos->history[pos->history_ply - 2].move, last_player_move);
@@ -955,7 +955,7 @@ static void sync_moves_from_history(const Position *pos) {
 #endif
 
 static void check_and_update_check_status(Position *pos) {
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
     int in_check = is_square_attacked(pos, get_lsb(pos->piece_bbs[KING] & pos->color_bbs[pos->side]), pos->side ^ 1);
     if (in_check) {
         strcpy(game_status_msg, "CHk     ");
@@ -1009,7 +1009,7 @@ static bool check_and_display_game_over(Position *pos) {
         if (in_check) {
             if (pos->side == WHITE) {
                 printf("\nCheckmate! Black wins!\n");
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
                 strcpy(game_status_msg, "nAtE bL ");
                 display_show_moves = false;
                 last_normal_toggle_ms = time_us_32() / 1000;
@@ -1017,7 +1017,7 @@ static bool check_and_display_game_over(Position *pos) {
 #endif
             } else {
                 printf("\nCheckmate! White wins!\n");
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
                 strcpy(game_status_msg, "nAtE UH ");
                 display_show_moves = false;
                 last_normal_toggle_ms = time_us_32() / 1000;
@@ -1026,7 +1026,7 @@ static bool check_and_display_game_over(Position *pos) {
             }
         } else {
             printf("\nStalemate! Game is a draw.\n");
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
             strcpy(game_status_msg, "drAU    ");
             display_show_moves = false;
             last_normal_toggle_ms = time_us_32() / 1000;
@@ -1038,7 +1038,7 @@ static bool check_and_display_game_over(Position *pos) {
     
     if (is_threefold_repetition(pos)) {
         printf("\nDraw by 3-fold repetition.\n");
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
         strcpy(game_status_msg, "drAU    ");
         display_show_moves = false;
         last_normal_toggle_ms = time_us_32() / 1000;
@@ -1049,7 +1049,7 @@ static bool check_and_display_game_over(Position *pos) {
 
     if (pos->halfmove >= 100) {
         printf("\nDraw by 50-move rule.\n");
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
         strcpy(game_status_msg, "drAU    ");
         display_show_moves = false;
         last_normal_toggle_ms = time_us_32() / 1000;
@@ -1063,7 +1063,7 @@ static bool check_and_display_game_over(Position *pos) {
 
 void console_loop(void) {
     // Initialize Transposition Table (safely allocate 32KB on microcontrollers, 16MB on host)
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
     init_tt(0);
 #else
     init_tt(16);
@@ -1071,7 +1071,7 @@ void console_loop(void) {
 
 
     Position pos;
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
     current_pos_ptr = &pos;
 #endif
     reset_game_search_state();
@@ -1087,7 +1087,7 @@ void console_loop(void) {
 
     print_board(&pos);
 
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
     update_tm1638_display();
 #endif
 
@@ -1166,7 +1166,7 @@ void console_loop(void) {
                 }
             }
 
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
             sync_moves_from_history(&pos);
             update_tm1638_display();
 #endif
@@ -1182,7 +1182,7 @@ void console_loop(void) {
                 printf("New game started.\n");
                 print_board(&pos);
             }
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
             display_show_moves = true;
             sync_moves_from_history(&pos);
             update_tm1638_display();
@@ -1207,7 +1207,7 @@ void console_loop(void) {
                 } else {
                     printf("Search level set to 8 (Infinite / manual stop).\n");
                 }
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
                 update_tm1638_display();
 #endif
             } else {
@@ -1233,7 +1233,7 @@ void console_loop(void) {
                     max_history_ply = pos.history_ply;
                     printf("Position loaded.\n");
                     print_board(&pos);
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
                     sync_moves_from_history(&pos);
 #endif
                 }
@@ -1245,7 +1245,7 @@ void console_loop(void) {
             ram_save_valid = true;
             printf("Position and settings saved to RAM quicksave slot.\n");
 
-#if !defined(__arm__) && !defined(PICO_BOARD)
+#if !defined(LUGALCHESS_EMBEDDED)
             FILE *f = fopen("lugalchess.save", "w");
             if (f) {
                 char fen_buf[256];
@@ -1258,7 +1258,7 @@ void console_loop(void) {
         } 
         else if (strcmp(line, "load") == 0) {
             bool loaded = false;
-#if !defined(__arm__) && !defined(PICO_BOARD)
+#if !defined(LUGALCHESS_EMBEDDED)
             FILE *f = fopen("lugalchess.save", "r");
             if (f) {
                 char fen_buf[256];
@@ -1296,7 +1296,7 @@ void console_loop(void) {
                     pos = ram_save_pos;
                     max_history_ply = pos.history_ply;
                     search_level = ram_save_level;
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
                     sync_moves_from_history(&pos);
                     if (!check_and_display_game_over(&pos)) {
                         check_and_update_check_status(&pos);
@@ -1338,7 +1338,7 @@ void console_loop(void) {
             }
 
             stop_search = false;
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
             current_search_best_move = 0;
             current_search_score = 0;
             current_search_depth = 1;
@@ -1348,7 +1348,7 @@ void console_loop(void) {
 
             Move best_move = 0;
             int score = 0;
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
             best_move = current_search_best_move;
             score = current_search_score;
 #endif
@@ -1366,7 +1366,7 @@ void console_loop(void) {
                 char move_str[6] = "";
                 format_move_str(best_move, move_str);
                 make_move(&pos, best_move);
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
                 strncpy(last_engine_move, move_str, 5);
                 last_engine_move[5] = '\0';
                 update_tm1638_display();
@@ -1389,7 +1389,7 @@ void console_loop(void) {
             } else {
                 printf("Nothing to undo.\n");
             }
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
             sync_moves_from_history(&pos);
             if (!check_and_display_game_over(&pos)) {
                 check_and_update_check_status(&pos);
@@ -1408,7 +1408,7 @@ void console_loop(void) {
             } else {
                 printf("Nothing to redo.\n");
             }
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
             sync_moves_from_history(&pos);
             if (!check_and_display_game_over(&pos)) {
                 check_and_update_check_status(&pos);
@@ -1454,7 +1454,7 @@ void console_loop(void) {
         else {
             // Try to parse input as a player move
             if (execute_player_move(&pos, line)) {
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
                 strncpy(last_player_move, line, 5);
                 last_player_move[5] = '\0';
                 strcpy(last_engine_move, "     ");

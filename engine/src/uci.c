@@ -50,7 +50,7 @@ static bool parse_and_make_move(Position *pos, const char *move_str) {
 // UCI protocol loop
 void uci_loop(void) {
     // Default Transposition Table size (safely allocate 32KB on microcontrollers, 16MB on host)
-#if defined(__arm__) || defined(PICO_BOARD)
+#if defined(LUGALCHESS_EMBEDDED)
     init_tt(0);
 #else
     init_tt(16);
