@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.15)
 
+# Optional RISC-V architecture selection for RP2350
+option(USE_RISCV "Build firmware for RP2350 Hazard3 RISC-V cores" OFF)
+if(USE_RISCV)
+    set(PICO_PLATFORM "rp2350-riscv" CACHE STRING "Pico platform target" FORCE)
+endif()
+
 # Include Pico SDK configuration
 include(pico_sdk_import.cmake)
 
