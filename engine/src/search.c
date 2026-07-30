@@ -613,7 +613,6 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
         depth += 2;
     }
 
-    printf("[DEBUG] search_position: getting start time...\n"); fflush(stdout);
     start_search_time_ms = get_time_ms();
     srand((unsigned int)(time(NULL) ^ start_search_time_ms));
     max_search_time_ms = time_limit_ms;
@@ -624,7 +623,6 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
     // Reset move ordering heuristics
     memset(killer_moves, 0, sizeof(killer_moves));
     
-    printf("[DEBUG] search_position: generating root moves...\n"); fflush(stdout);
     MoveList root_list;
     generate_moves(pos, &root_list);
     Move fallback_move = 0;
@@ -641,16 +639,13 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
 
     long prev_iter_time_ms = 0;
 
-    printf("[DEBUG] search_position: starting iterative deepening loop...\n"); fflush(stdout);
     // Iterative Deepening
     for (int d = 1; d <= depth; d++) {
-        printf("[DEBUG] search_position: depth %d start...\n", d); fflush(stdout);
         long iter_start_time_ms = get_time_ms();
 
         extern void search_progress_callback(Move move, int score, int depth);
         search_progress_callback(0, 0, d);
         int score = pv_search(pos, d, 0, -INFINITY_VALUE, INFINITY_VALUE, true);
-        printf("[DEBUG] search_position: depth %d pv_search returned %d\n", d, score); fflush(stdout);
         
         // If search was interrupted mid-iteration by stop/timer, discard incomplete depth results!
         if (stop_search) {
