@@ -119,7 +119,7 @@ sudo apt install gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential cmake
 #### Arch Linux
 ```bash
 sudo pacman -S arm-none-eabi-gcc arm-none-eabi-newlib cmake ninja make
-```
+ls ```
 
 #### macOS (Homebrew)
 > [!NOTE]
@@ -145,6 +145,17 @@ make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 
 #### RISC-V (Hazard3 Cores) Build
 The RP2350 microcontroller features dual Hazard3 RISC-V cores. To build specifically for the RISC-V target architecture, pass `-DUSE_RISCV=ON` or `-DPICO_PLATFORM=rp2350-riscv` (requires a RISC-V cross-compiler toolchain such as `gcc-riscv64-unknown-elf` or `gcc-riscv-none-embed`):
+
+For Arch Linux, install the following packages from AUR in the following order:
+
+1. [riscv-none-elf-binutils](https://aur.archlinux.org/packages/riscv-none-elf-binutils)
+2. [riscv-none-elf-gcc-stage1](https://aur.archlinux.org/packages/riscv-none-elf-gcc-stage1) needed in order to build `newlib`
+3. [riscv-none-elf-newlib](https://aur.archlinux.org/packages/riscv-none-elf-newlib)
+4. [riscv-none-elf-gcc](https://aur.archlinux.org/packages/riscv-none-elf-gcc) will uninstall the stage1 gcc that was only needed for newlib
+
+Notes:
+- the riscv32 bin package with precompiled toolchain and gcc does not contain the required newlib
+- the packages compile from source, which can take several hours
 
 ```bash
 mkdir build_firmware_riscv && cd build_firmware_riscv
