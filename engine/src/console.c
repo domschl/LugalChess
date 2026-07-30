@@ -360,7 +360,13 @@ void search_poll_stop_callback(void) {
 
 // Print commands help
 static void print_help(void) {
-    printf("\nLugalChess Interactive Console Commands:\n");
+    printf("\n=========================================\n");
+    printf("   %s v%s (%s)\n", LUGALCHESS_NAME, LUGALCHESS_VERSION, LUGALCHESS_PLATFORM);
+    printf("=========================================\n");
+    printf("Name:              %s\n", LUGALCHESS_NAME);
+    printf("Engine Version:    %s\n", LUGALCHESS_VERSION);
+    printf("Hardware Platform: %s\n\n", LUGALCHESS_PLATFORM);
+    printf("Interactive Console Commands:\n");
     printf("  help            - Show this help message\n");
     printf("  new             - Start a new game from the standard starting position\n");
     printf("  board (or d)    - Display the current board state\n");
@@ -1072,8 +1078,11 @@ void console_loop(void) {
     parse_fen(&pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
 
     printf("=========================================\n");
-    printf("   LugalChess Interactive Console Mode   \n");
+    printf("   %s v%s (%s)\n", LUGALCHESS_NAME, LUGALCHESS_VERSION, LUGALCHESS_PLATFORM);
     printf("=========================================\n");
+    printf("Name:              %s\n", LUGALCHESS_NAME);
+    printf("Engine Version:    %s\n", LUGALCHESS_VERSION);
+    printf("Hardware Platform: %s\n", LUGALCHESS_PLATFORM);
     printf("Type 'help' for a list of commands.\n\n");
 
     print_board(&pos);
@@ -1102,7 +1111,7 @@ void console_loop(void) {
 
         if (strcmp(line, "uci") == 0) {
             is_uci_client_mode = true;
-            printf("id name LugalChess 1.0\n");
+            printf("id name %s %s (%s)\n", LUGALCHESS_NAME, LUGALCHESS_VERSION, LUGALCHESS_PLATFORM);
             printf("id author Antigravity\n");
             printf("option name Hash type spin default 16 min 1 max 256\n");
             printf("uciok\n");

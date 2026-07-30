@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "version.h"
 
 #ifndef USE_MAGIC_BITBOARDS
 #define USE_MAGIC_BITBOARDS 1

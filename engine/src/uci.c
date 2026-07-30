@@ -61,7 +61,7 @@ void uci_loop(void) {
     Position pos;
     parse_fen(&pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
 
-    printf("LugalChess Engine initialized. Waiting for UCI commands...\n");
+    printf("%s Engine v%s (%s) initialized. Waiting for UCI commands...\n", LUGALCHESS_NAME, LUGALCHESS_VERSION, LUGALCHESS_PLATFORM);
     fflush(stdout);
 
     while (1) {
@@ -74,7 +74,7 @@ void uci_loop(void) {
         line[strcspn(line, "\r")] = '\0';
 
         if (strcmp(line, "uci") == 0) {
-            printf("id name LugalChess 1.0\n");
+            printf("id name %s %s (%s)\n", LUGALCHESS_NAME, LUGALCHESS_VERSION, LUGALCHESS_PLATFORM);
             printf("id author Antigravity\n");
             printf("option name Hash type spin default 16 min 1 max 256\n");
             printf("uciok\n");

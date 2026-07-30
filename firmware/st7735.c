@@ -603,3 +603,46 @@ void st7735_draw_status(const Position *pos, int level, int side, int current_de
 
     st7735_draw_string(2, 145, line2_buf, line2_color, 1);
 }
+
+// Render Startup Splash Screen with Chess Motif, Name, Version, and Platform info
+void st7735_draw_splash(const char *version, const char *platform) {
+    // Fill screen with deep navy background
+    st7735_fill_screen(0x0824);
+
+    // Decorative Gold Accent Borders
+    st7735_draw_rect(10, 10, 108, 2, ST7735_YELLOW);
+    st7735_draw_rect(10, 148, 108, 2, ST7735_YELLOW);
+
+    // Render Chess Pieces Motif Row: Rook, Knight, Queen, King
+    // Each piece is 16x16. 4 pieces = 64px width + 3*8px gap = 88px total width
+    // Centered at X = (128 - 88) / 2 = 20
+    const int pieces[4] = { ROOK, KNIGHT, QUEEN, KING };
+    const uint16_t colors[4] = { ST7735_YELLOW, ST7735_WHITE, ST7735_YELLOW, ST7735_WHITE };
+    for (int i = 0; i < 4; i++) {
+        int x = 20 + i * 24;
+        int y = 22;
+        int bitmap_idx = get_piece_bitmap_idx(pieces[i]);
+        st7735_draw_bitmap_mono(x, y, 16, 16, piece_bitmaps[bitmap_idx], colors[i], 0x0824);
+    }
+
+    // Title Text: "Lugal" and "Chess" in Size 2 Font
+    // Size 2 font: char width = 12px. "Lugal" is 5 chars * 12 = 60px wide. Centered X = 34
+    st7735_draw_string(34, 48, "Lugal", ST7735_YELLOW, 2);
+    st7735_draw_string(34, 68, "Chess", ST7735_WHITE, 2);
+
+    // Version String (Cyan)
+    char ver_buf[24];
+    snprintf(ver_buf, sizeof(ver_buf), "v%s", version ? version : "0.1.0");
+    int ver_len = (int)strlen(ver_buf);
+    int ver_x = (128 - ver_len * 6) / 2;
+    st7735_draw_string(ver_x > 0 ? ver_x : 4, 98, ver_buf, ST7735_CYAN, 1);
+
+    // Hardware Platform Label & Name
+    st7735_draw_string(37, 116, "Platform:", ST7735_GRAY, 1);
+    
+    char plat_buf[24];
+    snprintf(plat_buf, sizeof(plat_buf), "%s", platform ? platform : "Unknown");
+    int plat_len = (int)strlen(plat_buf);
+    int plat_x = (128 - plat_len * 6) / 2;
+    st7735_draw_string(plat_x > 0 ? plat_x : 4, 128, plat_buf, ST7735_YELLOW, 1);
+}
