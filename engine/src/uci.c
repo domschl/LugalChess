@@ -58,7 +58,7 @@ void uci_loop(void) {
 
 
     char line[2048];
-    Position pos;
+    static Position pos;
     parse_fen(&pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
 
     printf("%s Engine v%s (%s) initialized. Waiting for UCI commands...\n", LUGALCHESS_NAME, LUGALCHESS_VERSION, LUGALCHESS_PLATFORM);
@@ -109,7 +109,7 @@ void uci_loop(void) {
                 while (fen_len > 0 && fen[fen_len - 1] == ' ') fen_len--;
                 fen[fen_len] = '\0';
                 
-                Position temp_pos;
+                static Position temp_pos;
                 parse_fen(&temp_pos, fen);
                 if (is_position_valid(&temp_pos)) {
                     pos = temp_pos;

@@ -78,8 +78,8 @@ static void reset_game_search_state(void) {
     has_last_search_score = false;
     last_search_score_white = 0;
     current_search_depth = 0;
-    last_player_move[0] = '\0';
-    last_engine_move[0] = '\0';
+    strcpy(last_player_move, "    ");
+    strcpy(last_engine_move, "    ");
     strcpy(game_status_msg, "");
 }
 
@@ -291,6 +291,12 @@ void search_progress_callback(Move move, int score, int depth) {
 
 // Poll key to abort search and toggle thinking display every second
 void search_poll_stop_callback(void) {
+    // Service USB serial CDC non-blockingly to keep USB endpoint active and process stop commands
+    int c = getchar_timeout_us(0);
+    if (c == 's' || c == 'q') {
+        stop_search = true;
+    }
+
     // Check if Stop button (key 11) is pressed
     int key = tm1638_get_key();
     if (key == 11) {
@@ -879,9 +885,10 @@ static void get_line_custom(char *buffer, int max_len) {
             }
         }
 
-        // 2. Poll USB serial with 10ms timeout
-        c = getchar_timeout_us(10000);
+        // 2. Poll USB serial non-blockingly (timeout 0) to avoid WFE sleep deadlock on RISC-V
+        c = getchar_timeout_us(0);
         if (c == PICO_ERROR_TIMEOUT) {
+            busy_wait_us_32(100);
             if (current_board_mode == MODE_NORMAL && game_status_msg[0] != '\0') {
                 uint32_t now_ms = time_us_32() / 1000;
                 if (now_ms - last_normal_toggle_ms >= 1000) {
@@ -916,8 +923,10 @@ static void get_line_custom(char *buffer, int max_len) {
         // Handle newline / carriage return
         if (c == '\r' || c == '\n') {
             buffer[len] = '\0';
-            printf("\n");
-            fflush(stdout);
+            if (!is_uci_client_mode) {
+                printf("\n");
+                fflush(stdout);
+            }
             break;
         }
         // Handle Backspace (ASCII 8 or 127)
@@ -925,15 +934,19 @@ static void get_line_custom(char *buffer, int max_len) {
             if (len > 0) {
                 len--;
                 // Erase char on terminal (backspace, space, backspace)
-                printf("\b \b");
-                fflush(stdout);
+                if (!is_uci_client_mode) {
+                    printf("\b \b");
+                    fflush(stdout);
+                }
             }
         }
         // Handle printable characters
         else if (c >= 32 && c <= 126) {
             buffer[len++] = (char)c;
-            putchar(c);
-            fflush(stdout);
+            if (!is_uci_client_mode) {
+                putchar(c);
+                fflush(stdout);
+            }
         }
     }
 }
@@ -1070,7 +1083,7 @@ void console_loop(void) {
 #endif
 
 
-    Position pos;
+    static Position pos;
 #if defined(LUGALCHESS_EMBEDDED)
     current_pos_ptr = &pos;
 #endif
@@ -1223,7 +1236,7 @@ void console_loop(void) {
                 generate_fen(&pos, fen_buf);
                 printf("Current FEN: %s\n", fen_buf);
             } else {
-                Position temp_pos;
+                static Position temp_pos;
                 parse_fen(&temp_pos, fen_str);
                 if (!is_position_valid(&temp_pos)) {
                     printf("Error: Invalid FEN position (must have exactly 1 White king, 1 Black king, and valid check state).\n");
@@ -1369,9 +1382,7 @@ void console_loop(void) {
 #if defined(LUGALCHESS_EMBEDDED)
                 strncpy(last_engine_move, move_str, 5);
                 last_engine_move[5] = '\0';
-                update_tm1638_display();
-                printf("bestmove %s\n", move_str);
-                fflush(stdout);
+                sync_moves_from_history(&pos);
 #endif
                 if (!is_uci_client_mode) {
                     print_board(&pos);

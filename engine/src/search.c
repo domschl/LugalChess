@@ -80,7 +80,7 @@ static const BookEntry book_entries[] = {
     { "Bird's Op.",      book_move_15 }
 };
 
-#define MAX_SEARCH_PLYS 32
+#define MAX_SEARCH_PLYS 64
 
 static MoveList search_pv_movelists[MAX_SEARCH_PLYS];
 static int sort_scores[MAX_MOVES];
@@ -371,13 +371,13 @@ static void sort_moves(const Position *pos, MoveList *list, Move tt_move, int pl
 }
 
 // Quiescence Search (tactical search only)
-int quiescence(Position *pos, int alpha, int beta) {
+int quiescence(Position *pos, int ply, int alpha, int beta) {
     nodes_searched++;
     check_up_time();
     if (stop_search) return 0;
     
     // Safety guard to prevent stack overflow/out-of-bounds history plies
-    if (pos->history_ply >= MAX_PLYS - 1) {
+    if (ply >= MAX_SEARCH_PLYS - 1 || pos->history_ply >= MAX_PLYS - 1) {
         return evaluate(pos);
     }
     
@@ -390,16 +390,16 @@ int quiescence(Position *pos, int alpha, int beta) {
         alpha = stand_pat;
     }
     
-    int q_ply = pos->history_ply % MAX_SEARCH_PLYS;
-    MoveList *list = &search_pv_movelists[q_ply];
+    int safe_ply = ply % MAX_SEARCH_PLYS;
+    MoveList *list = &search_pv_movelists[safe_ply];
     generate_captures(pos, list);
-    sort_moves(pos, list, 0, q_ply);
+    sort_moves(pos, list, 0, safe_ply);
     
     for (int i = 0; i < list->count; i++) {
         if (!make_move(pos, list->moves[i])) {
             continue;
         }
-        int score = -quiescence(pos, -beta, -alpha);
+        int score = -quiescence(pos, ply + 1, -beta, -alpha);
         unmake_move(pos);
         
         if (stop_search) return 0;
@@ -458,7 +458,7 @@ int pv_search(Position *pos, int depth, int ply, int alpha, int beta, bool null_
 
     // Leaf nodes
     if (depth <= 0) {
-        return quiescence(pos, alpha, beta);
+        return quiescence(pos, ply + 1, alpha, beta);
     }
 
     // Null Move Pruning (NMP)
@@ -690,7 +690,8 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
         }
         
         // Print Principal Variation (PV) path
-        Position temp_pos = *pos;
+        static Position temp_pos;
+        temp_pos = *pos;
         int pv_ply = 0;
         Move pv_move = completed_best_move;
         

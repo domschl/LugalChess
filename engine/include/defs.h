@@ -67,7 +67,11 @@ enum {
 
 typedef uint16_t Move;
 
+#if defined(LUGALCHESS_EMBEDDED)
+#define MAX_PLYS 256
+#else
 #define MAX_PLYS 2048
+#endif
 #define MAX_MOVES 256
 
 #define MATE_VALUE 29000

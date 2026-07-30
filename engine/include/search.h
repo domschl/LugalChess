@@ -15,7 +15,7 @@ extern bool stop_search;
 extern long nodes_searched;
 
 void search_position(Position *pos, int depth, int time_limit_ms);
-int quiescence(Position *pos, int alpha, int beta);
+int quiescence(Position *pos, int ply, int alpha, int beta);
 int pv_search(Position *pos, int depth, int ply, int alpha, int beta, bool null_move_allowed);
 const char *get_book_line_name(const Position *pos);
 

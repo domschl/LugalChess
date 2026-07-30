@@ -484,7 +484,8 @@ static void get_pv_string(const Position *pos, Move best_move, int depth, char *
         return;
     }
 
-    Position temp_pos = *pos;
+    static Position temp_pos;
+    temp_pos = *pos;
     int pv_ply = 0;
     Move pv_move = best_move;
     pv_buf[0] = '\0';
