@@ -69,11 +69,15 @@ uint64_t run_perft(Position *pos, int depth) {
     return nodes;
 }
 
-int run_perft_tests(void) {
+int run_perft_tests_depth(int max_depth) {
     int errors = 0;
     int passed = 0;
     
-    printf("Starting PERFT Verification Suite...\n");
+    if (max_depth <= 0) {
+        max_depth = 5;
+    }
+
+    printf("Starting PERFT Verification Suite (Max Depth: %d)...\n", max_depth);
     printf("========================================================================\n");
 
     for (int i = 0; i < perft_cases_count; i++) {
@@ -83,9 +87,8 @@ int run_perft_tests(void) {
         Position pos;
         parse_fen(&pos, tc->fen);
         
-        // We test up to depth 5 or the maximum defined in the test case to avoid excessive runtimes
         int max_d = tc->depth_count;
-        if (max_d > 5) max_d = 5; // Cap at 5 for quick verify, but startpos goes to 4/5 fast.
+        if (max_d > max_depth) max_d = max_depth;
         
         printf("Depth: ");
         for (int d = 1; d <= max_d; d++) {
@@ -120,4 +123,8 @@ int run_perft_tests(void) {
 
     printf("PERFT Results: %d passed depths, %d errors.\n", passed, errors);
     return errors;
+}
+
+int run_perft_tests(void) {
+    return run_perft_tests_depth(5);
 }

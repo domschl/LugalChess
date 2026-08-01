@@ -35,6 +35,7 @@ add_executable(lugalchess_firmware
     ../engine/src/evaluation.c
     ../engine/src/search.c
     ../engine/src/uci.c
+    ../engine/src/perft.c
     ../engine/src/console.c
 )
 

@@ -8,6 +8,7 @@
 #include "search.h"
 #include "evaluation.h"
 #include "tt.h"
+#include "perft.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -405,6 +406,7 @@ static void print_help(void) {
     printf("  redo            - Re-apply 1 half-move\n");
     printf("  eval            - Print the static evaluation score of the current position\n");
     printf("  moves           - List all legal moves in the current position\n");
+    printf("  perft [depth]   - Run PERFT verification test suite up to specified depth (default: 5)\n");
     printf("  quit            - Exit the program\n");
     printf("  <move>          - Type a move in UCI format (e.g. e2e4, g1f3, e7e8q) to play it\n\n");
 }
@@ -1581,6 +1583,20 @@ void console_loop(void) {
             }
             printf("Total legal moves: %d\n", legal_cnt);
         } 
+        else if (safe_strncmp(line, "perft", 5) == 0 && (line[5] == '\0' || line[5] == ' ')) {
+            char *ptr = line + 5;
+            while (*ptr == ' ') ptr++;
+            int max_depth = 5;
+            if (*ptr != '\0') {
+                int parsed = atoi(ptr);
+                if (parsed > 0) {
+                    max_depth = parsed;
+                } else {
+                    printf("Invalid depth '%s'. Running PERFT tests with default depth %d.\n", ptr, max_depth);
+                }
+            }
+            run_perft_tests_depth(max_depth);
+        }
         else if (strcmp(line, "quit") == 0) {
             break;
         } 
