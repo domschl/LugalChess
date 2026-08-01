@@ -11,11 +11,21 @@
 // Cross-platform compiler built-ins for trailing zero count (LSB) and population count
 #if defined(__GNUC__) || defined(__clang__)
     static inline int count_bits(uint64_t bb) {
-        return __builtin_popcountll(bb);
+        uint32_t low = (uint32_t)bb;
+        uint32_t high = (uint32_t)(bb >> 32);
+        return __builtin_popcount(low) + __builtin_popcount(high);
     }
     static inline int get_lsb(uint64_t bb) {
-        if (bb == 0) return NO_SQ;
-        return __builtin_ctzll(bb);
+        if (bb == 0ULL) return NO_SQ;
+        uint32_t low = (uint32_t)bb;
+        if (low != 0U) {
+            return __builtin_ctz(low);
+        }
+        uint32_t high = (uint32_t)(bb >> 32);
+        if (high != 0U) {
+            return __builtin_ctz(high) + 32;
+        }
+        return NO_SQ;
     }
 #elif defined(_MSC_VER)
     #include <intrin.h>

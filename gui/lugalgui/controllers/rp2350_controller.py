@@ -1,11 +1,18 @@
 """RP2350 Hardware USB CDC Serial Interface Controller."""
 
+import datetime
+import queue
 import threading
 import time
 from typing import Any
 import serial
 import serial.tools.list_ports
 from PySide6.QtCore import QObject, Signal
+
+
+def _log(msg: str) -> None:
+    now = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    print(f"[{now}] [RP2350-DEBUG] {msg}", flush=True)
 
 
 class RP2350Controller(QObject):
@@ -25,6 +32,8 @@ class RP2350Controller(QObject):
         self.serial_inst: serial.Serial | None = None
         self.listen_thread: threading.Thread | None = None
         self._is_running: bool = False
+        self._serial_lock: threading.Lock = threading.Lock()
+        self._send_queue: queue.Queue[str] = queue.Queue()
 
     def start_engine(self) -> bool:
         """Tournament engine interface method to start hardware connection."""
@@ -44,28 +53,30 @@ class RP2350Controller(QObject):
     def start_autodetect(self) -> None:
         """Start background polling thread to detect RP2350 USB serial port."""
         if not self._is_running:
+            _log("Starting autodetect thread...")
             self._is_running = True
             self.listen_thread = threading.Thread(target=self._connection_loop, daemon=True)
             self.listen_thread.start()
 
     def stop(self) -> None:
         """Stop background thread and close serial connection."""
+        _log("Stopping RP2350 controller...")
         self._is_running = False
-        if self.serial_inst and self.serial_inst.is_open:
-            try:
-                self.serial_inst.close()
-            except Exception:
-                pass
-        self.serial_inst = None
+        with self._serial_lock:
+            if self.serial_inst and self.serial_inst.is_open:
+                try:
+                    self.serial_inst.close()
+                except Exception as e:
+                    _log(f"Error closing serial port: {e}")
+            self.serial_inst = None
         self.device_disconnected.emit()
 
     def send_command(self, cmd: str) -> None:
-        """Send command string to RP2350 device over serial CDC stream."""
-        if self.serial_inst and self.serial_inst.is_open:
-            try:
-                self.serial_inst.write((cmd.strip() + "\n").encode("utf-8"))
-            except Exception:
-                pass
+        """Send command string asynchronously over serial CDC stream without blocking GUI thread."""
+        if cmd:
+            clean_cmd = cmd.strip()
+            _log(f"Queued command -> {clean_cmd}")
+            self._send_queue.put(clean_cmd + "\n")
 
     def set_position(self, fen: str | None = None, moves: list[str] | None = None) -> None:
         """Send position FEN and move list to RP2350 hardware over serial."""
@@ -105,51 +116,85 @@ class RP2350Controller(QObject):
     @property
     def is_connected(self) -> bool:
         """Return True if RP2350 serial connection is active."""
-        if self.serial_inst and self.serial_inst.is_open:
-            return True
+        with self._serial_lock:
+            if self.serial_inst and self.serial_inst.is_open:
+                return True
         return self.connect_serial()
 
     def connect_serial(self, port: str | None = None) -> bool:
         """Attempt to open RP2350 USB CDC serial port."""
-        if self.serial_inst and self.serial_inst.is_open:
-            return True
+        with self._serial_lock:
+            if self.serial_inst and self.serial_inst.is_open:
+                return True
 
         if not port:
             port = self._find_rp2350_port()
 
         if port:
+            _log(f"Attempting connection to port: {port}")
             try:
-                self.serial_inst = serial.Serial(port, 115200, timeout=1.0)
-                self.port_name = port
+                inst = serial.Serial(port, 115200, timeout=1.0)
+                with self._serial_lock:
+                    self.serial_inst = inst
+                    self.port_name = port
+                _log(f"Successfully connected to port: {port}")
                 self.device_connected.emit(port)
                 self.send_command("uci")
                 return True
-            except Exception:
-                self.serial_inst = None
+            except Exception as e:
+                _log(f"Failed to open port {port}: {e}")
+                with self._serial_lock:
+                    self.serial_inst = None
                 return False
         return False
 
     def _connection_loop(self) -> None:
-        """Background thread loop managing connection and serial line reading."""
+        """Background thread loop managing connection and serial line reading/writing."""
         while self._is_running:
-            if not self.serial_inst or not self.serial_inst.is_open:
+            is_open = False
+            with self._serial_lock:
+                is_open = bool(self.serial_inst and self.serial_inst.is_open)
+
+            if not is_open:
                 if not self.connect_serial():
                     time.sleep(2.0)
                     continue
 
-            # Read lines while connected
+            # 1. Process and write queued outgoing commands to serial
+            while not self._send_queue.empty():
+                try:
+                    cmd_str = self._send_queue.get_nowait()
+                    _log(f"TX -> {cmd_str.strip()}")
+                    with self._serial_lock:
+                        if self.serial_inst and self.serial_inst.is_open:
+                            self.serial_inst.write(cmd_str.encode("utf-8"))
+                            self.serial_inst.flush()
+                    time.sleep(0.02)
+                except queue.Empty:
+                    break
+                except Exception as e:
+                    _log(f"TX ERROR: {e}")
+
+            # 2. Read incoming serial lines while connected
             try:
-                if self.serial_inst and self.serial_inst.in_waiting:
-                    line_bytes = self.serial_inst.readline()
-                    if line_bytes:
-                        line_str = line_bytes.decode("utf-8", errors="replace").strip()
-                        if line_str:
-                            self.line_received.emit(line_str)
-                            self._parse_line(line_str)
+                line_bytes = None
+                with self._serial_lock:
+                    if self.serial_inst and self.serial_inst.is_open:
+                        if self.serial_inst.in_waiting:
+                            line_bytes = self.serial_inst.readline()
+
+                if line_bytes:
+                    line_str = line_bytes.decode("utf-8", errors="replace").strip()
+                    if line_str:
+                        _log(f"RX <- {line_str}")
+                        self.line_received.emit(line_str)
+                        self._parse_line(line_str)
                 else:
-                    time.sleep(0.05)
-            except (serial.SerialException, OSError):
-                self.serial_inst = None
+                    time.sleep(0.02)
+            except (serial.SerialException, OSError) as e:
+                _log(f"RX DISCONNECT / ERROR: {e}")
+                with self._serial_lock:
+                    self.serial_inst = None
                 self.device_disconnected.emit()
                 time.sleep(2.0)
 
@@ -160,13 +205,16 @@ class RP2350Controller(QObject):
             return
 
         if tokens[0] == "bestmove" and len(tokens) >= 2:
+            _log(f"Parsed bestmove: {tokens[1]}")
             self.move_received.emit(tokens[1])
             self.best_move_found.emit(tokens[1], "")
         elif len(tokens) >= 3 and tokens[0] == "Engine" and tokens[1] == "plays:":
             # Handle human-readable stream mode fallback
+            _log(f"Parsed Engine plays: {tokens[2]}")
             self.move_received.emit(tokens[2])
             self.best_move_found.emit(tokens[2], "")
         elif tokens[0] == "ucinewgame" or line == "New game started.":
+            _log("Parsed ucinewgame signal")
             self.new_game_received.emit()
         elif tokens[0] == "info":
             info_data = self._parse_info_line(tokens[1:])

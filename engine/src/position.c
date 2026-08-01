@@ -204,12 +204,25 @@ void parse_fen(Position *pos, const char *fen) {
 
 // Make a move on the board. Returns false if move was illegal (leaves King in check).
 bool make_move(Position *pos, Move move) {
+    if (pos == NULL) return false;
     int from = MOVE_FROM(move);
     int to = MOVE_TO(move);
-    int flags = MOVE_FLAGS(move);
+    if (from < 0 || from >= 64 || to < 0 || to >= 64) {
+        return false;
+    }
+    if (pos->history_ply < 0 || pos->history_ply >= MAX_PLYS - 1) {
+        return false;
+    }
     int us = pos->side;
     int them = us ^ 1;
     int moved_piece = pos->board[from];
+    if (moved_piece == NO_PIECE || moved_piece < PAWN || moved_piece > KING) {
+        return false;
+    }
+    if ((pos->color_bbs[us] & (1ULL << from)) == 0) {
+        return false;
+    }
+    int flags = MOVE_FLAGS(move);
     int cap_piece = NO_PIECE;
     int cap_sq = to;
 
@@ -337,6 +350,9 @@ bool make_move(Position *pos, Move move) {
 
 // Unmake a previously executed move
 void unmake_move(Position *pos) {
+    if (pos == NULL || pos->history_ply <= 0) {
+        return;
+    }
     pos->history_ply--;
     
     Move move = pos->history[pos->history_ply].move;

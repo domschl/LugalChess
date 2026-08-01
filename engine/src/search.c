@@ -83,6 +83,7 @@ static const BookEntry book_entries[] = {
 #define MAX_SEARCH_PLYS 64
 
 static MoveList search_pv_movelists[MAX_SEARCH_PLYS];
+static MoveList search_q_movelists[MAX_SEARCH_PLYS];
 static int sort_scores[MAX_MOVES];
 
 __attribute__((noinline))
@@ -391,7 +392,7 @@ int quiescence(Position *pos, int ply, int alpha, int beta) {
     }
     
     int safe_ply = ply % MAX_SEARCH_PLYS;
-    MoveList *list = &search_pv_movelists[safe_ply];
+    MoveList *list = &search_q_movelists[safe_ply];
     generate_captures(pos, list);
     sort_moves(pos, list, 0, safe_ply);
     
@@ -429,7 +430,10 @@ int pv_search(Position *pos, int depth, int ply, int alpha, int beta, bool null_
     // Draw by repetition or 50-move rule
     if (ply > 0) {
         // Simple repetition check (check if current position hash matches any parent hash)
-        for (int i = pos->history_ply - 2; i >= pos->history_ply - pos->halfmove; i -= 2) {
+        int start_ply = pos->history_ply - 2;
+        int end_ply = pos->history_ply - pos->halfmove;
+        if (end_ply < 0) end_ply = 0;
+        for (int i = start_ply; i >= end_ply; i -= 2) {
             if (i >= 0 && pos->history[i].hash_key == pos->hash_key) {
                 return 0; // Draw score
             }
@@ -614,7 +618,7 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
     }
 
     start_search_time_ms = get_time_ms();
-    srand((unsigned int)(time(NULL) ^ start_search_time_ms));
+    srand((unsigned int)start_search_time_ms);
     max_search_time_ms = time_limit_ms;
     stop_search = false;
     nodes_searched = 0;
@@ -623,7 +627,7 @@ void search_position(Position *pos, int depth, int time_limit_ms) {
     // Reset move ordering heuristics
     memset(killer_moves, 0, sizeof(killer_moves));
     
-    MoveList root_list;
+    static MoveList root_list;
     generate_moves(pos, &root_list);
     Move fallback_move = 0;
     for (int i = 0; i < root_list.count; i++) {

@@ -46,9 +46,10 @@ target_include_directories(lugalchess_firmware PRIVATE
 
 # Set compile definitions (use 0 KB on-the-fly sliding attacks for embedded RAM limits)
 if(USE_RISCV)
-    target_compile_definitions(lugalchess_firmware PRIVATE USE_MAGIC_BITBOARDS=0 PICO_STACK_SIZE=4096 PICO_CORE1_STACK_SIZE=2048)
+    target_compile_options(lugalchess_firmware PRIVATE -O2 -mno-strict-align)
+    target_compile_definitions(lugalchess_firmware PRIVATE USE_MAGIC_BITBOARDS=0 PICO_STACK_SIZE=8192 PICO_CORE1_STACK_SIZE=4096 PICO_STDIO_USB_ENABLE_IRQ=1 PICO_STDIO_USB_SUPPORT_CHARS_AVAILABLE=1)
 else()
-    target_compile_definitions(lugalchess_firmware PRIVATE USE_MAGIC_BITBOARDS=0 PICO_STACK_SIZE=4096)
+    target_compile_definitions(lugalchess_firmware PRIVATE USE_MAGIC_BITBOARDS=0 PICO_STACK_SIZE=4096 PICO_STDIO_USB_ENABLE_IRQ=1 PICO_STDIO_USB_SUPPORT_CHARS_AVAILABLE=1)
 endif()
 
 # Link hardware libraries

@@ -292,9 +292,28 @@ void search_progress_callback(Move move, int score, int depth) {
 // Poll key to abort search and toggle thinking display every second
 void search_poll_stop_callback(void) {
     // Service USB serial CDC non-blockingly to keep USB endpoint active and process stop commands
-    int c = getchar_timeout_us(0);
-    if (c == 's' || c == 'q') {
-        stop_search = true;
+    static char poll_cmd_buf[64];
+    static int poll_cmd_len = 0;
+
+    int c;
+    while ((c = getchar_timeout_us(0)) != PICO_ERROR_TIMEOUT && c != EOF) {
+        if (c == '\r' || c == '\n') {
+            if (poll_cmd_len > 0) {
+                poll_cmd_buf[poll_cmd_len] = '\0';
+                if (strcmp(poll_cmd_buf, "stop") == 0 || strcmp(poll_cmd_buf, "s") == 0 || 
+                    strcmp(poll_cmd_buf, "q") == 0 || strcmp(poll_cmd_buf, "quit") == 0) {
+                    stop_search = true;
+                } else if (strcmp(poll_cmd_buf, "isready") == 0) {
+                    printf("readyok\n");
+                    fflush(stdout);
+                }
+                poll_cmd_len = 0;
+            }
+        } else if (c >= 32 && c <= 126) {
+            if (poll_cmd_len < (int)sizeof(poll_cmd_buf) - 1) {
+                poll_cmd_buf[poll_cmd_len++] = (char)c;
+            }
+        }
     }
 
     // Check if Stop button (key 11) is pressed
@@ -410,7 +429,7 @@ static bool execute_player_move(Position *pos, const char *move_str) {
         }
     }
 
-    MoveList list;
+    static MoveList list;
     generate_moves(pos, &list);
 
     // If user didn't specify a promotion piece, check if the only legal moves for this from/to are promotions.
@@ -508,7 +527,7 @@ static void make_engine_move(Position *pos) {
         best_move = get_tt_best_move(pos->hash_key);
     }
     if (best_move == 0) {
-        MoveList list;
+        static MoveList list;
         generate_moves(pos, &list);
         for (int i = 0; i < list.count; i++) {
             if (make_move(pos, list.moves[i])) {
@@ -885,10 +904,9 @@ static void get_line_custom(char *buffer, int max_len) {
             }
         }
 
-        // 2. Poll USB serial non-blockingly (timeout 0) to avoid WFE sleep deadlock on RISC-V
-        c = getchar_timeout_us(0);
+        // 2. Poll USB serial with 1ms timeout to allow USB CDC IRQ to service incoming packets
+        c = getchar_timeout_us(1000);
         if (c == PICO_ERROR_TIMEOUT) {
-            busy_wait_us_32(100);
             if (current_board_mode == MODE_NORMAL && game_status_msg[0] != '\0') {
                 uint32_t now_ms = time_us_32() / 1000;
                 if (now_ms - last_normal_toggle_ms >= 1000) {
@@ -907,7 +925,7 @@ static void get_line_custom(char *buffer, int max_len) {
         c = getchar();
 #endif
 
-        if (c == EOF || c == 0) {
+        if (c == EOF || c < 0 || c == 0) {
             continue;
         }
 
@@ -922,6 +940,9 @@ static void get_line_custom(char *buffer, int max_len) {
         
         // Handle newline / carriage return
         if (c == '\r' || c == '\n') {
+            if (len == 0) {
+                continue;
+            }
             buffer[len] = '\0';
             if (!is_uci_client_mode) {
                 printf("\n");
@@ -1006,7 +1027,7 @@ static bool is_threefold_repetition(const Position *pos) {
 }
 
 static bool check_and_display_game_over(Position *pos) {
-    MoveList list;
+    static MoveList list;
     generate_moves(pos, &list);
     int legal_cnt = 0;
     for (int i = 0; i < list.count; i++) {
@@ -1074,7 +1095,87 @@ static bool check_and_display_game_over(Position *pos) {
     return false;
 }
 
+static int safe_strncmp(const char *s1, const char *s2, size_t n) {
+    if (!s1 || !s2) return -1;
+    for (size_t i = 0; i < n; i++) {
+        if ((unsigned char)s1[i] != (unsigned char)s2[i]) {
+            return (int)((unsigned char)s1[i] - (unsigned char)s2[i]);
+        }
+        if (s1[i] == '\0') break;
+    }
+    return 0;
+}
+
+static int safe_strcmp(const char *s1, const char *s2) {
+    if (!s1 || !s2) return -1;
+    size_t i = 0;
+    while (s1[i] != '\0' && s2[i] != '\0') {
+        if ((unsigned char)s1[i] != (unsigned char)s2[i]) {
+            return (int)((unsigned char)s1[i] - (unsigned char)s2[i]);
+        }
+        i++;
+    }
+    return (int)((unsigned char)s1[i] - (unsigned char)s2[i]);
+}
+
+static char *safe_strstr(const char *haystack, const char *needle) {
+    if (!haystack || !needle) return NULL;
+    if (needle[0] == '\0') return (char *)haystack;
+
+    size_t needle_len = 0;
+    while (needle[needle_len] != '\0') needle_len++;
+
+    size_t i = 0;
+    while (haystack[i] != '\0') {
+        size_t j = 0;
+        while (needle[j] != '\0' && haystack[i + j] == needle[j]) {
+            j++;
+        }
+        if (j == needle_len) {
+            return (char *)&haystack[i];
+        }
+        i++;
+    }
+    return NULL;
+}
+
+static size_t safe_strlen(const char *s) {
+    if (!s) return 0;
+    size_t len = 0;
+    while (s[len] != '\0') len++;
+    return len;
+}
+
+__attribute__((unused)) static char *safe_strcpy(char *dest, const char *src) {
+    if (!dest || !src) return dest;
+    size_t i = 0;
+    while (src[i] != '\0') {
+        dest[i] = src[i];
+        i++;
+    }
+    dest[i] = '\0';
+    return dest;
+}
+
+__attribute__((unused)) static size_t safe_strcspn(const char *s, const char *reject) {
+    if (!s || !reject) return 0;
+    size_t i = 0;
+    while (s[i] != '\0') {
+        size_t j = 0;
+        while (reject[j] != '\0') {
+            if (s[i] == reject[j]) return i;
+            j++;
+        }
+        i++;
+    }
+    return i;
+}
+
 void console_loop(void) {
+    // Disable stdio buffering so all printf messages transmit to USB CDC instantly
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stdin, NULL, _IONBF, 0);
+
     // Initialize Transposition Table (safely allocate 32KB on microcontrollers, 16MB on host)
 #if defined(LUGALCHESS_EMBEDDED)
     init_tt(0);
@@ -1118,43 +1219,53 @@ void console_loop(void) {
         line[strcspn(line, "\r")] = '\0';
 
         // Skip empty input
-        if (strlen(line) == 0) {
+        if (safe_strlen(line) == 0) {
             continue;
         }
 
-        if (strcmp(line, "uci") == 0) {
+        if (safe_strcmp(line, "uci") == 0) {
             is_uci_client_mode = true;
             printf("id name %s %s (%s)\n", LUGALCHESS_NAME, LUGALCHESS_VERSION, LUGALCHESS_PLATFORM);
             printf("id author Antigravity\n");
             printf("option name Hash type spin default 16 min 1 max 256\n");
             printf("uciok\n");
-            fflush(stdout);
         }
-        else if (strcmp(line, "isready") == 0) {
+        else if (safe_strcmp(line, "isready") == 0) {
             is_uci_client_mode = true;
             printf("readyok\n");
-            fflush(stdout);
         }
-        else if (strcmp(line, "ucinewgame") == 0) {
+        else if (safe_strcmp(line, "ucinewgame") == 0) {
             is_uci_client_mode = true;
+            parse_fen(&pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
             clear_tt();
             reset_game_search_state();
+#if defined(LUGALCHESS_EMBEDDED)
+            display_show_moves = true;
+            if (!is_uci_client_mode) {
+                sync_moves_from_history(&pos);
+            }
+#endif
+            max_history_ply = pos.history_ply;
         }
-        else if (strncmp(line, "position", 8) == 0) {
+        else if (safe_strncmp(line, "position", 8) == 0) {
             is_uci_client_mode = true;
             reset_game_search_state();
-            char *ptr = line + 8;
-            while (*ptr == ' ') ptr++;
 
-            if (strncmp(ptr, "startpos", 8) == 0) {
+            int idx = 8;
+            while (line[idx] == ' ' && line[idx] != '\0') {
+              idx++;
+            }
+            char *ptr = &line[idx];
+
+            if (safe_strncmp(ptr, "startpos", 8) == 0) {
                 parse_fen(&pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
                 ptr += 8;
-            } else if (strncmp(ptr, "fen", 3) == 0) {
+            } else if (safe_strncmp(ptr, "fen", 3) == 0) {
                 ptr += 3;
-                while (*ptr == ' ') ptr++;
+                while (*ptr == ' ' && *ptr != '\0') ptr++;
                 char fen[512];
                 int fen_len = 0;
-                while (*ptr != '\0' && strncmp(ptr, "moves", 5) != 0) {
+                while (*ptr != '\0' && safe_strncmp(ptr, "moves", 5) != 0 && fen_len < 511) {
                     fen[fen_len++] = *ptr++;
                 }
                 while (fen_len > 0 && fen[fen_len - 1] == ' ') fen_len--;
@@ -1162,11 +1273,11 @@ void console_loop(void) {
                 parse_fen(&pos, fen);
             }
 
-            char *moves_ptr = strstr(ptr, "moves");
+            char *moves_ptr = safe_strstr(ptr, "moves");
             if (moves_ptr != NULL) {
                 moves_ptr += 5;
                 while (*moves_ptr != '\0') {
-                    while (*moves_ptr == ' ') moves_ptr++;
+                    while (*moves_ptr == ' ' && *moves_ptr != '\0') moves_ptr++;
                     if (*moves_ptr == '\0') break;
 
                     char move_str[10];
@@ -1180,8 +1291,9 @@ void console_loop(void) {
             }
 
 #if defined(LUGALCHESS_EMBEDDED)
-            sync_moves_from_history(&pos);
-            update_tm1638_display();
+            if (!is_uci_client_mode) {
+                sync_moves_from_history(&pos);
+            }
 #endif
         }
         else if (strcmp(line, "help") == 0) {
@@ -1197,8 +1309,10 @@ void console_loop(void) {
             }
 #if defined(LUGALCHESS_EMBEDDED)
             display_show_moves = true;
-            sync_moves_from_history(&pos);
-            update_tm1638_display();
+            if (!is_uci_client_mode) {
+                sync_moves_from_history(&pos);
+                update_tm1638_display();
+            }
             printf("ucinewgame\n");
             fflush(stdout);
 #endif
@@ -1322,26 +1436,28 @@ void console_loop(void) {
                 }
             }
         } 
-        else if (strncmp(line, "go", 2) == 0 && (line[2] == '\0' || line[2] == ' ')) {
+        else if (safe_strncmp(line, "go", 2) == 0 && (line[2] == '\0' || line[2] == ' ')) {
+            printf("info string go command received: %s\n", line);
+            fflush(stdout);
             int max_depth = 64;
             int time_limit = -1;
 
-            char *movetime_ptr = strstr(line, "movetime");
+            char *movetime_ptr = safe_strstr(line, "movetime");
             if (movetime_ptr != NULL) {
                 time_limit = atoi(movetime_ptr + 8);
             } else {
-                char *depth_ptr = strstr(line, "depth");
+                char *depth_ptr = safe_strstr(line, "depth");
                 if (depth_ptr != NULL) {
                     max_depth = atoi(depth_ptr + 5);
                 } else if (pos.side == WHITE) {
-                    char *wtime_ptr = strstr(line, "wtime");
+                    char *wtime_ptr = safe_strstr(line, "wtime");
                     if (wtime_ptr != NULL) {
                         time_limit = atoi(wtime_ptr + 5) / 20;
                     } else {
                         time_limit = level_times_ms[search_level - 1];
                     }
                 } else {
-                    char *btime_ptr = strstr(line, "btime");
+                    char *btime_ptr = safe_strstr(line, "btime");
                     if (btime_ptr != NULL) {
                         time_limit = atoi(btime_ptr + 5) / 20;
                     } else {
@@ -1357,7 +1473,13 @@ void console_loop(void) {
             current_search_depth = 1;
 #endif
 
+            printf("info string starting search_position depth=%d time_limit=%d ms\n", max_depth, time_limit);
+            fflush(stdout);
+
             search_position(&pos, max_depth, time_limit);
+
+            printf("info string search_position completed\n");
+            fflush(stdout);
 
             Move best_move = 0;
             int score = 0;
@@ -1384,6 +1506,10 @@ void console_loop(void) {
                 last_engine_move[5] = '\0';
                 sync_moves_from_history(&pos);
 #endif
+                printf("bestmove %s\n", move_str);
+                printf("Engine plays: %s (Score: %+d)\n", move_str, score);
+                fflush(stdout);
+
                 if (!is_uci_client_mode) {
                     print_board(&pos);
                 }
@@ -1431,7 +1557,7 @@ void console_loop(void) {
             printf("Static Evaluation Score: %+d centipawns (from current side's perspective)\n", score);
         } 
         else if (strcmp(line, "moves") == 0) {
-            MoveList list;
+            static MoveList list;
             generate_moves(&pos, &list);
             printf("Legal moves in this position:\n");
             int legal_cnt = 0;

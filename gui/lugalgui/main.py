@@ -324,16 +324,15 @@ class MainWindow(QMainWindow):
     @Slot(str)
     def on_user_move(self, uci_move: str) -> None:
         """Handle move played on the graphical chessboard."""
+        print(f"[GUI-DEBUG] on_user_move called with move: {uci_move}", flush=True)
         if self.game_tree.push_uci_str(uci_move):
             self._update_board_and_notation()
             self.status_game_label.setText(self.game_tree.get_status_str())
             
-            # Send updated position to active engine target
-            moves_list = [m.uci() for m in self.game_tree.move_history]
-            if self._is_rp2350_selected():
-                self.rp2350_controller.set_position(moves=moves_list)
-            else:
-                self.uci_controller.set_position(moves=moves_list)
+            # Trigger engine calculation for reply move if game is active
+            if not self.game_tree.is_game_over():
+                print("[GUI-DEBUG] Auto-triggering engine search for reply move...", flush=True)
+                self.on_engine_go()
 
     @Slot()
     def on_undo_move(self) -> None:
@@ -401,6 +400,7 @@ class MainWindow(QMainWindow):
 
         is_rp2350 = self._is_rp2350_selected()
         controller = self.rp2350_controller if is_rp2350 else self.uci_controller
+        print(f"[GUI-DEBUG] on_engine_go called. Target is_rp2350={is_rp2350}, time_limit={t_ms}ms, moves={moves_list}", flush=True)
 
         if is_rp2350 and not self.rp2350_controller.serial_inst:
             QMessageBox.warning(self, "RP2350 Disconnected", "RP2350 hardware is not connected over USB serial!")

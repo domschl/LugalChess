@@ -364,7 +364,7 @@ void st7735_draw_bitmap_mono(int x, int y, int w, int h, const uint16_t *bitmap,
     st7735_set_window(x, y, x + w - 1, y + h - 1);
     
     // Formulate RGB565 stream
-    uint8_t buffer[512]; // 16x16 pixels is 256 pixels, which is exactly 512 bytes!
+    static uint8_t buffer[512]; // 16x16 pixels is 256 pixels, which is 512 bytes
     int idx = 0;
     
     uint8_t fg_h = fg_color >> 8;
